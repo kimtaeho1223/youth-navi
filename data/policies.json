@@ -1,0 +1,415 @@
+{
+  "meta": {
+    "name": "청년 지원 내비 규칙표",
+    "basis_date": "2026-11-18",
+    "note": "규칙표 시트를 검수한 뒤 옮긴 데이터. 최종 자격은 각 기관 심사로 결정됨"
+  },
+  "policies": [
+    {
+      "id": "P1",
+      "kind": "지원금",
+      "name": "실업급여 (구직급여)",
+      "eligibility": "이직일 이전 18개월 동안 피보험단위기간 합산 180일 이상, 일할 의사·능력이 있지만 미취업, 재취업 노력, 비자발적 이직",
+      "benefit": "1일 상한·하한액이 있고 지급일수는 나이·가입기간에 따라 다름 (금액은 고용센터가 산정)",
+      "caution": "수급 중에는 국민취업지원제도 참여 불가, 서울시 청년수당 신청 제외, 훈련장려금 미지급",
+      "timing": "퇴사 후 수시. 이직일 다음 날부터 12개월 안에 다 받아야 함",
+      "sources": [
+        {
+          "title": "고용보험법 제40조 요약 (2차 자료)",
+          "url": "https://korea.legal/wiki/%ea%b3%a0%ec%9a%a9%eb%b3%b4%ed%97%98%eb%b2%95-%ec%a0%9c40%ec%a1%b0/"
+        }
+      ],
+      "status": "2차 자료"
+    },
+    {
+      "id": "P2",
+      "kind": "지원금",
+      "name": "국민취업지원제도 Ⅰ유형 (구직촉진수당)",
+      "eligibility": "15~69세, 가구 중위소득 60% 이하, 가구 재산 4억 원 이하, 요건심사형은 최근 2년 취업경험 100일 또는 800시간 이상. 청년특례: 15~34세, 중위소득 120% 이하, 재산 5억 원 이하. 대학교 최종학년 마지막 학기 재학·휴학생은 참여 가능",
+      "benefit": "구직촉진수당 월 60만 원 × 6개월",
+      "caution": "실업급여·공공일자리·기타 취업 관련 정부/지자체 지원금이 끝난 지 6개월이 안 되면 참여 불가. 본인 월평균 소득이 1인 가구 중위소득 60% 이상이면 제한. 생계급여 수급자 제외",
+      "timing": "수시 (고용24·고용센터). 심사 약 1개월",
+      "sources": [
+        {
+          "title": "고용24 취업지원신청 소개",
+          "url": "https://www.work24.go.kr/ua/z/z/1300/selectEmssRqutIntro.do"
+        },
+        {
+          "title": "고용24 국민취업지원제도 제도안내",
+          "url": "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systId=SI00000316&systClId=SC00000206"
+        },
+        {
+          "title": "찾기쉬운 생활법령: 구직촉진수당의 수급 자격",
+          "url": "https://easylaw.go.kr/CSP/OnhunqueansInfoRetrieve.laf?onhunqnaAstSeq=82&onhunqueSeq=5871&search_put="
+        },
+        {
+          "title": "정부정책포털: 국민취업지원제도 (2차 자료)",
+          "url": "https://portal.barogov.kr/policy/national-employment-support/"
+        }
+      ],
+      "status": "공식 + 2차 섞임",
+      "amount": {
+        "monthly": 600000,
+        "months": 6
+      }
+    },
+    {
+      "id": "P3",
+      "kind": "지원금",
+      "name": "국민취업지원제도 Ⅱ유형",
+      "eligibility": "청년(15~34세)은 소득·재산·취업경험과 관계없이 참여 가능",
+      "benefit": "취업지원서비스, 직업훈련 참여 시 훈련참여지원수당(금액은 고용센터 확인), 취업성공수당",
+      "caution": "실업급여 수급 중 참여 불가, 수급이 끝나면 바로 참여 가능",
+      "timing": "수시 (고용24·고용센터). 심사 약 1개월",
+      "sources": [
+        {
+          "title": "고용24 FAQ: 실업급여 수급 중 국민취업지원제도 참여",
+          "url": "https://m.work24.go.kr/cm/c/a/0130/selectBbttInfo.do?bbsClCd=VJQMx/a2p6AfqLQqwR8sSQ%3D%3D&ntceStno=31"
+        },
+        {
+          "title": "고용노동부 빠른상담: 국민취업지원제도 참여자 직업훈련 혜택 (2022)",
+          "url": "https://www.moel.go.kr/minwon/fastcounsel/fastcounselView.do?inetDcssMngId=202212071053293721000"
+        },
+        {
+          "title": "정부정책포털: 국민취업지원제도 (2차 자료)",
+          "url": "https://portal.barogov.kr/policy/national-employment-support/"
+        }
+      ],
+      "status": "공식 + 2차 섞임"
+    },
+    {
+      "id": "P4",
+      "kind": "지원금",
+      "name": "서울시 청년수당",
+      "eligibility": "주민등록상 서울 거주, 만 19~34세(제대군인은 복무기간만큼 최대 3년 연장), 최종학력 졸업 후 미취업(주 30시간 이하 또는 3개월 이하 단기근로는 가능), 건강보험료 기준 중위소득 150% 이하",
+      "benefit": "활동지원금 월 50만 원 × 최대 6개월 + 성장 지원 프로그램",
+      "caution": "재학·휴학생, 유사사업 참여자(국민취업지원제도 Ⅰ·Ⅱ유형 등), 과거 청년수당 참여자(생애 1회), 기초생활수급자·차상위, 신청 시점 실업급여 수급자, 군복무자 제외",
+      "timing": "연 1~2회 모집 (2026년: 3월, 5월 추가). 다음 모집 공고 확인 필요",
+      "sources": [
+        {
+          "title": "청년몽땅정보통 서울시 청년수당 소개",
+          "url": "https://youth.seoul.go.kr/youthConts.do?key=2310100061&sc_bbsCtgrySn=2310200011&sc_pbancSeCd=012"
+        },
+        {
+          "title": "서울시 미디어허브: 청년수당 추가 모집",
+          "url": "https://mediahub.seoul.go.kr/archives/2018273"
+        }
+      ],
+      "status": "공식 확인",
+      "amount": {
+        "monthly": 500000,
+        "months": 6
+      }
+    },
+    {
+      "id": "P5",
+      "kind": "교육",
+      "name": "국민내일배움카드 (일반 훈련)",
+      "eligibility": "대부분 신청 가능. 제외: 공무원·사립학교 교직원, 75세 이상, 졸업까지 2년 이상 남은 대학생, 생계급여 수급자 등",
+      "benefit": "5년간 훈련비 300만 원(최대 500만 원). 140시간 이상 과정·월 출석률 80% 이상이면 훈련장려금 월 최대 11만 6천 원",
+      "caution": "실업급여 수급 기간에는 훈련장려금 미지급, 원격훈련은 훈련장려금 없음",
+      "timing": "수시 (고용24에서 카드 발급 신청)",
+      "sources": [
+        {
+          "title": "고용센터 국민내일배움카드 안내문 (제주대 게시본)",
+          "url": "https://www.jeju.ac.kr/square/notice.htm?page=2&seq=29241&act=download&no=1"
+        },
+        {
+          "title": "고용노동부 빠른상담: 국민취업지원제도 참여자 직업훈련 혜택 (2022)",
+          "url": "https://www.moel.go.kr/minwon/fastcounsel/fastcounselView.do?inetDcssMngId=202212071053293721000"
+        }
+      ],
+      "status": "공식 + 2차 섞임",
+      "amount": {
+        "monthly": 116000
+      }
+    },
+    {
+      "id": "P6",
+      "kind": "교육",
+      "name": "K-디지털 트레이닝 (KDT)",
+      "eligibility": "국민내일배움카드 보유자, KDT 처음 참여 시 카드 잔액이 있으면 가능. 평균 6개월, 주 5일, 하루 8시간",
+      "benefit": "훈련비 90% 이상 지원(본인부담 최대 60만 원). 140시간 이상 + 실업 상태 또는 주 15시간 미만 근로 시 훈련장려금 월 최대 20만 원. 일부 과정 특별훈련수당 월 10~60만 원",
+      "caution": "월 출석률 80% 미만이면 장려금·수당 미지급. 수료하지 않고 중도에 그만두면 KDT 재참여 불가",
+      "timing": "과정별 모집 (고용24 훈련과정 검색)",
+      "sources": [
+        {
+          "title": "고용24 K-디지털 트레이닝 제도안내",
+          "url": "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systId=SI00000423&systClId=SC00000197"
+        },
+        {
+          "title": "내일배움카드 본인부담 정리 (2차 자료)",
+          "url": "https://glasswallet.com/blog/tomorrow-learning-card-guide/"
+        }
+      ],
+      "status": "공식 + 2차 섞임",
+      "amount": {
+        "monthly": 200000,
+        "months": 6
+      }
+    },
+    {
+      "id": "P7",
+      "kind": "교육",
+      "name": "K-뉴딜 아카데미",
+      "eligibility": "15~34세 미취업 청년(재학생 등 일부 제외), 400시간 이상·3개월 이상 과정, 기업별 모집",
+      "benefit": "출석률에 따라 훈련수당 수도권 월 최대 30만 원, 비수도권 월 최대 50만 원",
+      "caution": "다른 수당·훈련과 같이 받을 수 있는지는 과정별 운영 기준에 따라 다름",
+      "timing": "기업별 모집 (2026년 7월부터 순차 개설)",
+      "sources": [
+        {
+          "title": "고용노동부 보도자료: K-뉴딜 아카데미 참여기업 선정 (2026-06-17)",
+          "url": "https://www.moel.go.kr/news/enews/report/enewsView.do?news_seq=19542"
+        },
+        {
+          "title": "고용노동부 청년뉴딜 안내",
+          "url": "https://moelyouth.work24.go.kr/"
+        },
+        {
+          "title": "헤럴드경제: K-뉴딜 아카데미 (400시간·3개월)",
+          "url": "https://biz.heraldcorp.com/article/10722039"
+        }
+      ],
+      "status": "공식 + 2차 섞임",
+      "amount": {
+        "monthly_capital": 300000,
+        "monthly_noncapital": 500000,
+        "months": 3
+      }
+    }
+  ],
+  "relations": [
+    {
+      "id": "R1",
+      "a": "실업급여",
+      "b": "국취 Ⅰ유형",
+      "relation": "순서 있음",
+      "rule": "실업급여를 받는 동안에는 Ⅰ유형 참여 불가. 수급이 끝난 다음 날부터 6개월이 지나야 참여 가능",
+      "sources": [
+        {
+          "title": "고용24 FAQ: 실업급여 수급 중 국민취업지원제도 참여",
+          "url": "https://m.work24.go.kr/cm/c/a/0130/selectBbttInfo.do?bbsClCd=VJQMx/a2p6AfqLQqwR8sSQ%3D%3D&ntceStno=31"
+        },
+        {
+          "title": "찾기쉬운 생활법령: 구직촉진수당의 수급 자격",
+          "url": "https://easylaw.go.kr/CSP/OnhunqueansInfoRetrieve.laf?onhunqnaAstSeq=82&onhunqueSeq=5871&search_put="
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R2",
+      "a": "실업급여",
+      "b": "국취 Ⅱ유형",
+      "relation": "순서 있음",
+      "rule": "실업급여를 받는 동안에는 Ⅱ유형 참여 불가. 수급이 끝나면 바로 참여 가능",
+      "sources": [
+        {
+          "title": "고용24 FAQ: 실업급여 수급 중 국민취업지원제도 참여",
+          "url": "https://m.work24.go.kr/cm/c/a/0130/selectBbttInfo.do?bbsClCd=VJQMx/a2p6AfqLQqwR8sSQ%3D%3D&ntceStno=31"
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R3",
+      "a": "국취 Ⅰ·Ⅱ유형",
+      "b": "서울시 청년수당",
+      "relation": "동시 불가",
+      "rule": "2026.5.1부터 국취 참여가 끝날 때까지 Ⅰ·Ⅱ유형 참여자는 청년수당 신청 대상에서 제외",
+      "sources": [
+        {
+          "title": "청년몽땅정보통 서울시 청년수당 소개",
+          "url": "https://youth.seoul.go.kr/youthConts.do?key=2310100061&sc_bbsCtgrySn=2310200011&sc_pbancSeCd=012"
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R4",
+      "a": "서울시 청년수당",
+      "b": "국취 Ⅰ유형",
+      "relation": "순서 있음",
+      "rule": "실업급여, 공공일자리, 기타 취업 관련 정부·지자체 지원금이 끝난 지 6개월이 안 되면 Ⅰ유형 참여 불가. 서울시 청년수당은 이 제한에 해당할 수 있음 (최종 판단은 고용센터)",
+      "sources": [
+        {
+          "title": "고용24 국민취업지원제도 제도안내",
+          "url": "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systId=SI00000316&systClId=SC00000206"
+        },
+        {
+          "title": "찾기쉬운 생활법령: 구직촉진수당의 수급 자격",
+          "url": "https://easylaw.go.kr/CSP/OnhunqueansInfoRetrieve.laf?onhunqnaAstSeq=82&onhunqueSeq=5871&search_put="
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R5",
+      "a": "실업급여",
+      "b": "서울시 청년수당",
+      "relation": "동시 불가",
+      "rule": "청년수당 신청 시점에 실업급여를 받고 있으면 신청 제외",
+      "sources": [
+        {
+          "title": "청년몽땅정보통 서울시 청년수당 소개",
+          "url": "https://youth.seoul.go.kr/youthConts.do?key=2310100061&sc_bbsCtgrySn=2310200011&sc_pbancSeCd=012"
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R6",
+      "a": "실업급여",
+      "b": "내일배움카드·KDT 훈련장려금",
+      "relation": "부분 제한",
+      "rule": "훈련 수강은 가능하지만 실업급여 수급 기간에는 훈련장려금 미지급",
+      "sources": [
+        {
+          "title": "고용센터 국민내일배움카드 안내문 (제주대 게시본)",
+          "url": "https://www.jeju.ac.kr/square/notice.htm?page=2&seq=29241&act=download&no=1"
+        }
+      ],
+      "status": "공식 + 2차 섞임"
+    },
+    {
+      "id": "R7",
+      "a": "국취 Ⅰ유형",
+      "b": "국비 훈련 (내일배움카드·KDT)",
+      "relation": "병행 가능",
+      "rule": "Ⅰ유형 참여자가 직업훈련을 들으면 구직촉진수당과 훈련장려금을 함께 받음 (답변 당시 금액은 현재와 다름)",
+      "sources": [
+        {
+          "title": "고용노동부 빠른상담: 국민취업지원제도 참여자 직업훈련 혜택 (2022)",
+          "url": "https://www.moel.go.kr/minwon/fastcounsel/fastcounselView.do?inetDcssMngId=202212071053293721000"
+        }
+      ],
+      "status": "공식 + 2차 섞임"
+    },
+    {
+      "id": "R8",
+      "a": "국취 Ⅱ유형",
+      "b": "국비 훈련 (내일배움카드·KDT)",
+      "relation": "병행 가능",
+      "rule": "Ⅱ유형 참여자가 직업훈련을 들으면 훈련참여지원수당과 훈련장려금을 함께 받음 (금액은 현재와 다를 수 있음)",
+      "sources": [
+        {
+          "title": "고용노동부 빠른상담: 국민취업지원제도 참여자 직업훈련 혜택 (2022)",
+          "url": "https://www.moel.go.kr/minwon/fastcounsel/fastcounselView.do?inetDcssMngId=202212071053293721000"
+        }
+      ],
+      "status": "공식 + 2차 섞임"
+    },
+    {
+      "id": "R9",
+      "a": "국취 Ⅰ유형",
+      "b": "훈련장려금·일경험 수당",
+      "relation": "주의",
+      "rule": "훈련장려금 등 프로그램 수당도 소득으로 신고해야 하고, 다른 소득과 합쳐 기준을 넘으면 구직촉진수당이 줄거나 정지될 수 있음",
+      "sources": [
+        {
+          "title": "구직촉진수당 소득신고 Q&A (2차 자료)",
+          "url": "https://angelsitter.co.kr/board.view.php?board=bbs&no=1510"
+        }
+      ],
+      "status": "2차 자료"
+    },
+    {
+      "id": "R10",
+      "a": "KDT 중도 포기",
+      "b": "KDT 재참여",
+      "relation": "주의",
+      "rule": "수료하지 않고 중도에 그만두면 KDT에 다시 참여할 수 없음",
+      "sources": [
+        {
+          "title": "고용24 K-디지털 트레이닝 제도안내",
+          "url": "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systId=SI00000423&systClId=SC00000197"
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R11",
+      "a": "K-뉴딜 아카데미",
+      "b": "국취·청년수당·KDT",
+      "relation": "확인 필요",
+      "rule": "다른 수당과 같이 받을 수 있는지는 사업별 세부 지침과 과정(아카데미)별 운영 기준에 따라 다름. 과정 모집 공고·운영기관 또는 1350에 확인 필요",
+      "sources": [],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R12",
+      "a": "서울시 청년수당",
+      "b": "내일배움카드·KDT",
+      "relation": "병행 가능",
+      "rule": "청년수당을 받는 동안 KDT·내일배움카드 훈련에 참여 가능",
+      "sources": [
+        {
+          "title": "서울시 청년수당 콜센터 1566-3344 확인 (2026-11-18)",
+          "url": ""
+        },
+        {
+          "title": "청년몽땅정보통 서울시 청년수당 소개",
+          "url": "https://youth.seoul.go.kr/youthConts.do?key=2310100061&sc_bbsCtgrySn=2310200011&sc_pbancSeCd=012"
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R13",
+      "a": "본인 소득",
+      "b": "국취 Ⅰ유형",
+      "relation": "주의",
+      "rule": "본인 월평균 소득이 1인 가구 기준 중위소득 60% 이상이면 구직촉진수당 수급자격을 인정하지 않을 수 있음",
+      "sources": [
+        {
+          "title": "찾기쉬운 생활법령: 구직촉진수당의 수급 자격",
+          "url": "https://easylaw.go.kr/CSP/OnhunqueansInfoRetrieve.laf?onhunqnaAstSeq=82&onhunqueSeq=5871&search_put="
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R14",
+      "a": "실업급여",
+      "b": "국취·다른 제도 먼저 참여",
+      "relation": "순서 있음",
+      "rule": "실업급여는 최종 이직일 다음 날부터 12개월 안에 다 받아야 함. 신청이 늦어지면 남은 급여일수가 사라질 수 있음",
+      "sources": [
+        {
+          "title": "고용노동부 빠른상담: 실업급여 수급기간 12개월",
+          "url": "https://www.moel.go.kr/minwon/fastcounsel/fastcounselView.do?inetDcssMngId=202409040138290740644"
+        }
+      ],
+      "status": "공식 확인"
+    },
+    {
+      "id": "R15",
+      "a": "국취 참여 종료",
+      "b": "국취 재참여",
+      "relation": "주의",
+      "rule": "취업지원이 끝나면 종료일로부터 3년이 지나야 다시 신청 가능. 취업·창업으로 끝난 경우 등은 1~3년 사이로 단축 가능",
+      "sources": [
+        {
+          "title": "고용24 국민취업지원제도 제도안내",
+          "url": "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systId=SI00000316&systClId=SC00000206"
+        }
+      ],
+      "status": "공식 확인"
+    }
+  ],
+  "median_income_2026": {
+    "source": {
+      "title": "보건복지부 2026년 기준 중위소득",
+      "url": "https://www.mohw.go.kr/menu.es?mid=a10708010900"
+    },
+    "monthly": {
+      "1": 2564238,
+      "2": 4199292,
+      "3": 5359036,
+      "4": 6494738,
+      "5": 7556719,
+      "6": 8555952,
+      "7": 9515150
+    }
+  }
+}
