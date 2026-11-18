@@ -25,7 +25,7 @@ QUESTIONS = {
     "seoul": "주민등록상 사는 곳이 서울인가요?",
     "school": "학교는 졸업하셨나요? 아니면 지금 몇 학년 몇 학기인가요?",
     "years_left": "졸업까지 몇 년 남았나요?",
-    "insured_days_18m": "퇴사 전 1년 반 동안 4대보험 되는 곳에서 며칠 정도 일하셨나요?",
+    "insured_days_18m": "퇴사 전 1년 반 동안 4대보험 되는 곳에서 며칠 정도 일하셨나요? (일한 적 없으면 0)",
     "quit_date": "마지막으로 퇴사한 날짜가 언제인가요?",
     "quit_reason": "퇴사는 계약 만료·권고사직이었나요, 직접 그만두셨나요?",
     "own_income": "지금 한 달에 대략 얼마 버세요?",
@@ -193,7 +193,7 @@ def page_confirm():
         st.markdown("#### 일·소득")
         c = st.columns(3)
         with c[0]:
-            p["insured_days_18m"] = num_in(L("퇴사 전 18개월 고용보험 가입 일수 (대략)", "insured_days_18m"), p.get("insured_days_18m"), "f_ins", step=30, help="1개월은 약 30일")
+            p["insured_days_18m"] = num_in(L("퇴사 전 18개월 고용보험 가입 일수 (일한 적 없으면 0)", "insured_days_18m"), p.get("insured_days_18m"), "f_ins", step=30, help="1개월은 약 30일")
             p["quit_date"] = date_in(L("마지막 퇴사일", "quit_date"), p.get("quit_date"), "f_quit")
             p["quit_reason"] = pick(L("퇴사 사유", "quit_reason"), E.QUIT, p.get("quit_reason"), "f_qr")
         with c[1]:
@@ -281,7 +281,7 @@ def page_result():
             import json
             try:
                 with st.spinner("AI가 결과를 쉬운 말로 정리하고 있어요..."):
-                    explanation = cached_explain(json.dumps(E.summary_for_llm(result), ensure_ascii=False), tuple(MODELS))
+                    explanation = cached_explain(json.dumps(E.summary_for_llm(result, p), ensure_ascii=False), tuple(MODELS))
                 ai_used = True
             except llm.LLMError as e:
                 st.caption(f"AI 설명을 만들지 못해 규칙 결과로 대신 보여드려요. ({e})")
