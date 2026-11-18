@@ -605,13 +605,31 @@ def analyze(profile: dict, today: date, data: dict | None = None) -> dict:
     return {"verdicts": verdicts, "plans": plans, "insight": order_insight(plans)}
 
 
-def summary_for_llm(result: dict) -> dict:
-    """AI 설명용 요약. 여기 있는 사실만 설명에 쓰게 한다."""
+TRAINING_PID = {"general": "P5", "kdt": "P6", "knewdeal": "P7"}
+TRAINING_RULES = {"kdt": {"R10"}, "knewdeal": {"R11"}}
+
+
+def summary_for_llm(result: dict, profile: dict | None = None) -> dict:
+    """AI 설명용 요약. 여기 있는 사실만 설명에 쓰게 한다.
+    관심 없는 교육(KDT·K-뉴딜)의 판정과 주의사항은 빼서 설명이 사용자 상황에 집중하게 한다."""
+    interest = set((profile or {}).get("training_interest") or [])
+    skip_pids = {pid for k, pid in TRAINING_PID.items() if k != "general" and k not in interest}
+    skip_rules = set().union(*(r for k, r in TRAINING_RULES.items() if k not in interest)) if profile is not None else set()
+    if profile is None:
+        skip_pids = set()
+
+    def keep(reason):
+        return reason.rule not in skip_rules
+
+    labels = [TRAININGS[k] for k in TRAININGS if k in interest]
     return {
-        "판정": [{"정책": v.name, "결과": v.status, "이유": [r.text for r in v.reasons],
-                  "가능 시작일": fmt(v.available_from) if v.available_from else None} for v in result["verdicts"].values()],
+        "관심 교육": labels or ["특정 교육을 고르지 않음"],
+        "판정": [{"정책": v.name, "결과": v.status, "이유": [r.text for r in v.reasons if keep(r)],
+                  "가능 시작일": fmt(v.available_from) if v.available_from else None}
+                 for pid, v in result["verdicts"].items() if pid not in skip_pids],
         "추천 경로": [{"이름": pl.title, "설명": pl.summary, "순서": [f"{s.when}: {s.what}" for s in pl.steps],
-                       "주의": [w.text for w in pl.warnings], "확인 필요": [c.text for c in pl.checks],
+                       "주의": [w.text for w in pl.warnings if keep(w)],
+                       "확인 필요": [c.text for c in pl.checks if keep(c)],
                        "예상 합계(알 수 있는 금액만)": won(pl.total()) if pl.total() else "금액 확인 필요"} for pl in result["plans"]],
         "순서 비교": result["insight"].text if result["insight"] else None,
     }
