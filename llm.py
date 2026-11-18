@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import re
 
-DEFAULT_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]
+# 정식 모델 이름을 먼저 시도하고, 모두 안 되면 내 키로 쓸 수 있는 flash 모델을 자동으로 찾는다.
+DEFAULT_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.0-flash"]
 
 
 class LLMError(Exception):
@@ -90,19 +91,51 @@ def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mo
         temperature=0,
         response_mime_type="application/json" if json_mode else "text/plain",
     )
-    last = None
-    for model in models:
+    errors = []
+    tried = set()
+
+    def _try(model):
+        tried.add(model)
         try:
             resp = client.models.generate_content(model=model, contents=prompt, config=config)
             if resp.text:
                 return resp.text
+            errors.append(f"{model}: 응답이 비어 있어요.")
         except Exception as e:  # 모델 이름 오류·사용량 초과 등
-            last = e
-            continue
-    msg = str(last) if last else "응답이 비어 있어요."
+            errors.append(f"{model}: {e}")
+        return None
+
+    for model in models:
+        out = _try(model)
+        if out:
+            return out
+    # 정해 둔 이름이 모두 실패하면, 이 키로 쓸 수 있는 flash 모델 목록에서 찾아본다.
+    for name in _discover_flash(client):
+        if name not in tried:
+            out = _try(name)
+            if out:
+                return out
+    msg = " | ".join(errors) if errors else "응답이 비어 있어요."
     if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
         raise LLMError("무료 사용량 한도에 도달했어요. 잠시 뒤 다시 시도하거나 직접 입력해 주세요.")
-    raise LLMError(f"AI 호출에 실패했어요: {msg[:200]}")
+    raise LLMError(f"AI 호출에 실패했어요: {errors[0][:200] if errors else msg}")
+
+
+def _discover_flash(client) -> list[str]:
+    """API 키로 사용 가능한 모델 중 generateContent를 지원하는 flash 모델 이름을 돌려준다."""
+    names = []
+    try:
+        for m in client.models.list():
+            name = (getattr(m, "name", "") or "").removeprefix("models/")
+            actions = getattr(m, "supported_actions", None) or []
+            if "flash" in name and "image" not in name and "tts" not in name and "live" not in name \
+                    and (not actions or "generateContent" in actions):
+                names.append(name)
+    except Exception:
+        return []
+    # lite가 아닌 것 → 최신 버전 순으로
+    names.sort(key=lambda n: ("lite" in n, "preview" in n or "exp" in n, [-ord(c) for c in n]))
+    return names[:5]
 
 
 def extract_profile(text: str, today_iso: str, api_key: str, models: list[str]) -> tuple[dict, int]:
