@@ -1,422 +1,725 @@
-"""청년 지원 내비 - Streamlit 화면.
+"""청년 지원 내비 - 규칙 엔진.
 
-실행: streamlit run app.py
-Gemini API 키는 .streamlit/secrets.toml (배포 시 Streamlit Cloud의 Secrets)에 GEMINI_API_KEY로 넣는다.
+판정은 이 파일의 규칙(코드)만으로 한다. AI(LLM)는 판정하지 않는다.
+모든 판단에는 data/policies.json의 규칙 ID(P1~P7, R1~R15)를 근거로 붙인다.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
+import json
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from pathlib import Path
 
-import streamlit as st
+DATA_PATH = Path(__file__).parent / "data" / "policies.json"
 
-import engine as E
-import llm
-from personas import PERSONAS
+# 판정 결과 상태
+OK = "가능"
+NO = "불가"
+WAIT = "기다리면 가능"
+NOW = "받는 중"
+CHECK = "확인 필요"
+ASK = "정보 필요"
 
-st.set_page_config(page_title="청년 지원 내비", page_icon="🧭", layout="wide")
-
-DATA = E.load_data()
-TODAY = datetime.now(ZoneInfo("Asia/Seoul")).date()
-
-# 되묻기 질문 (규칙표 '입력 항목' 탭)
-QUESTIONS = {
-    "age": "만 나이가 어떻게 되세요?",
-    "seoul": "주민등록상 사는 곳이 서울인가요?",
-    "school": "학교는 졸업하셨나요? 아니면 지금 몇 학년 몇 학기인가요?",
-    "years_left": "졸업까지 몇 년 남았나요?",
-    "insured_days_18m": "퇴사 전 1년 반 동안 4대보험 되는 곳에서 며칠 정도 일하셨나요? (일한 적 없으면 0)",
-    "quit_date": "마지막으로 퇴사한 날짜가 언제인가요?",
-    "quit_reason": "퇴사는 계약 만료·권고사직이었나요, 직접 그만두셨나요?",
-    "own_income": "지금 한 달에 대략 얼마 버세요?",
-    "household_income_band": "가구소득이 기준 중위소득의 몇 % 구간인가요? (아래 소득 기준표 참고)",
-    "assets_over_5eok": "가족 재산(집 등)을 합치면 5억 원을 넘나요?",
-    "work_exp_100days": "최근 2년 동안 일한 기간을 합치면 100일이 넘나요?",
-    "kukchwi_end": "국민취업지원제도가 끝난 날짜가 언제인가요?",
-    "training_capital": "듣고 싶은 교육이 수도권(서울·경기·인천)에서 열리나요?",
-}
-STATUS_ICON = {E.OK: "🟢", E.WAIT: "🕒", E.NOW: "🔵", E.CHECK: "🟡", E.ASK: "❔", E.NO: "🔴"}
+# 프로필 항목에 쓰는 값
+SCHOOL = {"graduated": "졸업·수료·중퇴", "last_semester": "최종학년 마지막 학기 (재학·휴학)",
+          "enrolled": "재학 중 (마지막 학기 아님)", "leave": "휴학 중 (마지막 학기 아님)"}
+WORK = {"none": "일하지 않음", "short": "단기·시간제 근로 (주 30시간 이하 또는 3개월 이하)",
+        "full": "취업 중 (주 30시간 초과이면서 3개월 초과)"}
+QUIT = {"involuntary": "계약 만료·권고사직 등 (비자발적)", "voluntary": "스스로 그만둠 (자발적)"}
+BAND = {"le60": "중위소득 60% 이하", "60to120": "60% 초과 ~ 120% 이하",
+        "120to150": "120% 초과 ~ 150% 이하", "gt150": "150% 초과"}
+STATUS3 = {"none": "받은 적 없음", "receiving": "지금 받는 중", "ended": "받았고 끝남"}
+TRAININGS = {"kdt": "K-디지털 트레이닝 (KDT)", "knewdeal": "K-뉴딜 아카데미", "general": "일반 국비 훈련 (내일배움카드)"}
 
 
-def secret(name, default=None):
+def load_data(path: Path = DATA_PATH) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+# ---------- 날짜 도우미 ----------
+def to_date(v) -> date | None:
+    if v is None or v == "":
+        return None
+    if isinstance(v, date):
+        return v
+    s = str(v)
     try:
-        return st.secrets.get(name, default)
-    except Exception:
-        return default
+        if len(s) == 7:  # YYYY-MM
+            return date(int(s[:4]), int(s[5:7]), 1)
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        return None
 
 
-API_KEY = secret("GEMINI_API_KEY")
-MODELS = [m for m in [secret("GEMINI_MODEL")] if m] + llm.DEFAULT_MODELS
+def add_months(d: date, months: int) -> date:
+    y = d.year + (d.month - 1 + months) // 12
+    m = (d.month - 1 + months) % 12 + 1
+    last = [31, 29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
+    return date(y, m, min(d.day, last))
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def cached_extract(text: str, today_iso: str, models: tuple):
-    return llm.extract_profile(text, today_iso, API_KEY, list(models))
+def fmt(d: date | None) -> str:
+    return f"{d.year}년 {d.month}월 {d.day}일" if d else "날짜 미정"
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def cached_explain(summary_json: str, models: tuple):
-    import json
-    return llm.explain(json.loads(summary_json), API_KEY, list(models))
+def won(n: int | None) -> str:
+    return f"{n:,}원" if n is not None else "금액 확인 필요"
 
 
-def init_state():
-    for k, v in {"stage": "input", "text": "", "profile": {}, "persona": None, "notice": None}.items():
-        st.session_state.setdefault(k, v)
+# ---------- 결과 구조 ----------
+@dataclass
+class Reason:
+    text: str
+    rule: str  # P1~P7 또는 R1~R15
 
 
-def go(stage):
-    st.session_state.stage = stage
-    st.rerun()
+@dataclass
+class Verdict:
+    pid: str
+    name: str
+    status: str
+    reasons: list[Reason] = field(default_factory=list)
+    available_from: date | None = None
+    missing: list[str] = field(default_factory=list)  # 판정에 더 필요한 프로필 항목
+    allowance_note: str | None = None
+
+    def add(self, text, rule):
+        self.reasons.append(Reason(text, rule))
 
 
-# ---------------- 사이드바 ----------------
-def sidebar():
-    with st.sidebar:
-        st.markdown("### 🧭 청년 지원 내비")
-        st.write("교육·지원금을 **같이 받을 수 있는 조합**과 **신청 순서**를 근거와 함께 알려드려요.")
-        st.markdown(f"- 규칙 기준일: **{DATA['meta']['basis_date']}**\n- 다루는 제도: 지원금 4개, 교육 3개\n- 판정은 규칙(코드)이 하고, AI는 입력 정리와 설명만 해요")
-        st.caption("최종 자격은 각 기관의 심사로 결정돼요. 신청 전에 공식 공고를 꼭 확인하세요.")
-        with st.expander("2026년 기준 중위소득 (월)"):
-            for n, v in DATA["median_income_2026"]["monthly"].items():
-                st.write(f"{n}인: 100% {v:,}원 · 60% {round(v*0.6):,}원 · 120% {round(v*1.2):,}원 · 150% {round(v*1.5):,}원")
-            src = DATA["median_income_2026"]["source"]
-            st.caption(f"출처: [{src['title']}]({src['url']})")
-        if not API_KEY:
-            st.warning("Gemini API 키가 설정되지 않아 AI 기능 없이 직접 입력 모드로 동작해요.")
+@dataclass
+class Step:
+    when: str
+    what: str
+    rules: list[str]
 
 
-# ---------------- 1. 상황 입력 ----------------
-def page_input():
-    st.title("🧭 청년 지원 내비")
-    st.subheader("교육을 들으면서 받을 수 있는 지원금, 무엇부터 신청해야 할까요?")
-    st.info("🔒 **이름·연락처·주민번호 같은 개인정보는 입력하지 마세요.** 나이, 사는 지역, 학교·일 상태처럼 판정에 필요한 내용만 적어주세요.")
-
-    st.markdown("**예시 인물로 바로 해보기** (가상 인물이에요)")
-    cols = st.columns(len(PERSONAS))
-    for col, (pid, per) in zip(cols, PERSONAS.items()):
-        if col.button(per["label"], key=f"p_{pid}", use_container_width=True):
-            st.session_state.text = per["text"]
-            st.session_state.persona = pid
-            st.rerun()
-
-    st.text_area("지금 상황을 편하게 적어주세요", key="text", height=160,
-                 placeholder="예) 27살이고 서울 살아요. 올해 2월에 졸업했고 알바 3개월 했어요. KDT에 합격했는데 교육 듣는 동안 생활비가 걱정돼요.")
-    c1, c2 = st.columns([1, 1])
-    if c1.button("🤖 AI로 정리하기", type="primary", use_container_width=True, disabled=not st.session_state.text.strip()):
-        run_extract()
-    if c2.button("✍️ 직접 입력하기", use_container_width=True):
-        st.session_state.profile = {}
-        st.session_state.notice = None
-        go("confirm")
+@dataclass
+class Bar:
+    """타임라인 막대 하나. start·length는 '기준 시점'부터 센 개월 수."""
+    label: str
+    start: int
+    length: int
+    kind: str           # money(받는 돈) · training(교육) · wait(기다림·심사) · blocked(신청 불가) · open(이때부터 가능)
+    rule: str = ""
+    unsure: bool = False  # 기간이 사람·과정마다 달라 그림 길이가 가정인 막대
+    text: str = ""        # 막대 안 글자 (비우면 'N개월')
 
 
-def run_extract():
-    text = st.session_state.text.strip()
-    persona = next((pid for pid, per in PERSONAS.items() if per["text"] == text), None)
-    if not API_KEY:
-        st.session_state.profile = dict(PERSONAS[persona]["profile"]) if persona else {}
-        st.session_state.notice = ("warning", "AI 키가 없어 정리를 건너뛰었어요." + (" 예시 인물의 기본값을 넣어뒀어요." if persona else " 아래에서 직접 입력해 주세요."))
-        go("confirm")
-    try:
-        with st.spinner("AI가 상황을 정리하고 있어요..."):
-            profile, masked = cached_extract(text, TODAY.isoformat(), tuple(MODELS))
-        msg = "AI가 정리한 내용이에요. 틀린 곳은 고치고, 빈 곳은 채워주세요."
-        if persona:
-            # 예시 인물: AI가 비워 둔 칸만 미리 정해 둔 가상 인물 값으로 채운다 (AI가 정리한 값은 그대로 둠)
-            filled = [k for k, v in PERSONAS[persona]["profile"].items() if profile.get(k) in (None, [], "")]
-            for k in filled:
-                profile[k] = PERSONAS[persona]["profile"][k]
-            if filled:
-                msg += f" 예시 인물이라 AI가 비워 둔 {len(filled)}칸은 미리 정해 둔 값으로 채웠어요."
-        if masked:
-            msg += f" (개인정보로 보이는 내용 {masked}개는 AI에 보내기 전에 가렸어요.)"
-        st.session_state.profile = profile
-        st.session_state.notice = ("success", msg)
-    except llm.LLMError as e:
-        st.session_state.profile = dict(PERSONAS[persona]["profile"]) if persona else {}
-        st.session_state.notice = ("warning", f"{e}" + (" 예시 인물의 기본값을 넣어뒀어요." if persona else " 아래에서 직접 입력해 주세요."))
-    go("confirm")
+@dataclass
+class Timeline:
+    anchor: str          # 0개월이 언제인지 (예: '지금', '청년수당 시작')
+    bars: list[Bar]
+    note: str = ""
 
 
-# ---------------- 2. 확인·되묻기 ----------------
-def pick(label, options: dict, current, key, help=None):
-    keys = [None] + list(options.keys())
-    labels = ["모름 / 해당 없음"] + list(options.values())
-    idx = keys.index(current) if current in keys else 0
-    choice = st.selectbox(label, labels, index=idx, key=key, help=help)
-    return keys[labels.index(choice)]
+@dataclass
+class Plan:
+    key: str
+    title: str
+    summary: str
+    steps: list[Step]
+    money: list[tuple[str, int | None, int | None]]  # (항목, 월 금액, 개월)
+    warnings: list[Reason]
+    checks: list[Reason]
+    timeline: Timeline | None = None
+
+    def total(self) -> int | None:
+        tot = 0
+        for _, monthly, months in self.money:
+            if monthly is None or months is None:
+                continue
+            tot += monthly * months
+        return tot or None
 
 
-def yesno(label, current, key):
-    return pick(label, {True: "예", False: "아니요"}, current, key)
+# ---------- 판정 도우미 ----------
+def _youth_age(p: dict, base_max=34) -> bool | None:
+    """병역 기간(최대 3년)만큼 상한을 늘린 청년 나이 여부."""
+    age = p.get("age")
+    if age is None:
+        return None
+    extra = min(int(p.get("military_months") or 0), 36) // 12
+    return 15 <= age <= base_max + extra
 
 
-def date_in(label, current, key):
-    d = E.to_date(current)
-    v = st.date_input(label, value=d, key=key, min_value=date(2015, 1, 1), max_value=date(2030, 12, 31), format="YYYY-MM-DD")
-    return v.isoformat() if v else None
+def _own_income_limit(data) -> int:
+    return round(data["median_income_2026"]["monthly"]["1"] * 0.6)
 
 
-def num_in(label, current, key, step=1, help=None):
-    v = st.number_input(label, value=current, min_value=0, step=step, key=key, help=help)
-    return int(v) if v is not None else None
+def _program_state(p, key):
+    return p.get(f"{key}_status") or "none", to_date(p.get(f"{key}_end"))
 
 
-def page_confirm():
-    st.title("📝 내용 확인")
-    if st.session_state.notice:
-        kind, msg = st.session_state.notice
-        getattr(st, kind)(msg)
-    p = dict(st.session_state.profile)
-
-    # 되묻기: 지금 정보로 판정했을 때 더 필요한 항목
-    pre = E.judge_all(p, TODAY, DATA)
-    need = list(dict.fromkeys(m for v in pre.values() for m in v.missing))
-    if need:
-        st.markdown("#### ❔ 정확한 판정을 위해 더 알려주세요")
-        st.caption("아래 입력 칸 중 ❗ 표시가 붙은 칸을 채워 주세요. 비워 두면 그 제도는 '정보 필요'로 나와요.")
-        for k in need:
-            if k in QUESTIONS:
-                st.markdown(f"- {QUESTIONS[k]}")
-    needed = set(need)
-
-    def L(text, key):
-        return f"❗ {text}" if key in needed else text
-
-    with st.form("profile_form"):
-        st.markdown("#### 기본 정보")
-        c = st.columns(3)
-        with c[0]:
-            p["age"] = num_in(L("만 나이", "age"), p.get("age"), "f_age")
-            p["military_months"] = num_in("군 복무 개월 수 (없으면 0)", p.get("military_months"), "f_mil")
-        with c[1]:
-            p["seoul"] = yesno(L("주민등록상 서울 거주", "seoul"), p.get("seoul"), "f_seoul")
-            p["school"] = pick(L("학교", "school"), E.SCHOOL, p.get("school"), "f_school")
-        with c[2]:
-            p["years_left"] = num_in(L("(재학 중이면) 졸업까지 남은 햇수", "years_left"), p.get("years_left"), "f_left")
-            p["working"] = pick("지금 일하는 상태", E.WORK, p.get("working"), "f_work")
-
-        st.markdown("#### 일·소득")
-        c = st.columns(3)
-        with c[0]:
-            p["insured_days_18m"] = num_in(L("퇴사 전 18개월 고용보험 가입 일수 (일한 적 없으면 0)", "insured_days_18m"), p.get("insured_days_18m"), "f_ins", step=30, help="1개월은 약 30일")
-            p["quit_date"] = date_in(L("마지막 퇴사일", "quit_date"), p.get("quit_date"), "f_quit")
-            p["quit_reason"] = pick(L("퇴사 사유", "quit_reason"), E.QUIT, p.get("quit_reason"), "f_qr")
-        with c[1]:
-            p["own_income"] = num_in(L("(일하는 중이면) 본인 월소득 (원)", "own_income"), p.get("own_income"), "f_own", step=100000)
-            p["household_size"] = num_in("가구원 수 (본인 포함)", p.get("household_size"), "f_hh")
-            p["household_income_band"] = pick(L("가구소득 구간 (기준 중위소득 대비)", "household_income_band"), E.BAND, p.get("household_income_band"), "f_band",
-                                              help="왼쪽 사이드바의 2026년 기준 중위소득 표를 참고하세요")
-        with c[2]:
-            p["assets_over_5eok"] = yesno(L("가구 재산 5억 원 초과", "assets_over_5eok"), p.get("assets_over_5eok"), "f_asset")
-            p["work_exp_100days"] = yesno(L("최근 2년 일한 기간 합계 100일 이상", "work_exp_100days"), p.get("work_exp_100days"), "f_exp")
-            p["livelihood_benefit"] = yesno("생계급여 수급자", p.get("livelihood_benefit"), "f_liv")
-            p["low_income_class"] = yesno("기초생활수급자 또는 차상위계층", p.get("low_income_class"), "f_low")
-
-        st.markdown("#### 받았거나 받는 중인 제도")
-        c = st.columns(3)
-        with c[0]:
-            p["unemployment_status"] = pick("실업급여", E.STATUS3, p.get("unemployment_status"), "f_us")
-            p["unemployment_end"] = date_in("실업급여 종료(예정)일", p.get("unemployment_end"), "f_ue")
-        with c[1]:
-            p["kukchwi_status"] = pick("국민취업지원제도", {"none": "참여한 적 없음", "receiving": "지금 참여 중", "ended": "참여했고 끝남"}, p.get("kukchwi_status"), "f_ks")
-            p["kukchwi_end"] = date_in(L("국민취업지원제도 종료일", "kukchwi_end"), p.get("kukchwi_end"), "f_ke")
-        with c[2]:
-            p["youth_allowance_status"] = pick("서울시 청년수당", E.STATUS3, p.get("youth_allowance_status"), "f_ys")
-            p["youth_allowance_end"] = date_in("청년수당 종료(예정)일", p.get("youth_allowance_end"), "f_ye")
-
-        st.markdown("#### 관심 있는 교육")
-        c = st.columns(3)
-        with c[0]:
-            chosen = st.multiselect("듣고 싶은 교육", list(E.TRAININGS.values()),
-                                    default=[E.TRAININGS[k] for k in (p.get("training_interest") or []) if k in E.TRAININGS], key="f_tr")
-            p["training_interest"] = [k for k, v in E.TRAININGS.items() if v in chosen]
-        with c[1]:
-            p["training_capital"] = yesno(L("교육 장소가 수도권", "training_capital"), p.get("training_capital"), "f_cap")
-        with c[2]:
-            p["kdt_dropout"] = yesno("예전에 KDT를 중간에 그만둔 적 있음", p.get("kdt_dropout"), "f_drop")
-
-        submitted = st.form_submit_button("🔍 조합과 순서 확인하기", type="primary", use_container_width=True)
-
-    if submitted:
-        st.session_state.profile = {k: v for k, v in p.items() if v is not None and v != []}
-        go("result")
-    if st.button("← 상황 다시 적기"):
-        go("input")
+# ---------- 정책별 판정 ----------
+def judge_unemployment(p, today) -> Verdict:
+    v = Verdict("P1", "실업급여 (구직급여)", OK)
+    st, end = _program_state(p, "unemployment")
+    if st == "receiving":
+        v.status = NOW
+        v.add("지금 실업급여를 받는 중이에요. 이직일 다음 날부터 12개월 안에 다 받아야 해요.", "R14")
+        return v
+    if st == "ended":
+        v.status = NO
+        v.add("이미 받은 실업급여는 다시 받을 수 없어요 (새로 일하고 다시 퇴사하면 새로 판단).", "P1")
+        return v
+    if p.get("working") == "full":
+        v.status = NO
+        v.add("지금 취업 중이라 실업급여 대상이 아니에요.", "P1")
+        return v
+    days = p.get("insured_days_18m")
+    if days is None:
+        v.status, v.missing = ASK, v.missing + ["insured_days_18m"]
+    elif days < 180:
+        v.status = NO
+        v.add(f"퇴사 전 18개월 동안 고용보험 가입 기간이 180일이 안 돼요 (약 {days}일).", "P1")
+        return v
+    quit_date = to_date(p.get("quit_date"))
+    if quit_date is None:
+        v.status, v.missing = ASK, v.missing + ["quit_date"]
+    else:
+        deadline = add_months(quit_date, 12)
+        if deadline <= today:
+            v.status = NO
+            v.add(f"퇴사일 다음 날부터 12개월이 지나서({fmt(deadline)}까지) 받을 수 없어요.", "R14")
+            return v
+        v.add(f"{fmt(deadline)} 전에 다 받아야 해요. 늦게 신청하면 남은 날수가 사라질 수 있어요.", "R14")
+    reason = p.get("quit_reason")
+    if reason is None:
+        v.status, v.missing = ASK, v.missing + ["quit_reason"]
+    elif reason == "voluntary":
+        v.status = CHECK
+        v.add("스스로 그만둔 경우는 원칙적으로 대상이 아니에요. 정당한 사유가 있었는지 고용센터에 확인하세요.", "P1")
+    if v.status == OK:
+        v.add("고용보험 180일 이상, 비자발적 퇴사 조건을 충족해요.", "P1")
+    return v
 
 
-# ---------------- 3. 결과·근거 ----------------
-TL_STYLE = {  # kind: (배경, 테두리, 글자, 범례 이름)
-    "money": ("#d9f2e3", "#2e9e5b", "#14532d", "받는 돈"),
-    "training": ("#dbe8fb", "#3b73c9", "#1e3a6e", "교육"),
-    "wait": ("#ececec", "#9a9a9a", "#3f3f3f", "심사·기다림"),
-    "blocked": ("#fde2e2", "#d64545", "#7f1d1d", "신청 불가"),
-    "open": ("#fff1c9", "#d49a00", "#6b4e00", "이때부터 가능"),
-}
+def _kukchwi_common(v: Verdict, p, today, data, type1: bool) -> None:
+    """국취 Ⅰ·Ⅱ유형 공통 제한."""
+    age = p.get("age")
+    if age is None:
+        v.status, v.missing = ASK, v.missing + ["age"]
+    elif not (15 <= age <= 69):
+        v.status = NO
+        v.add("국민취업지원제도는 15~69세가 대상이에요.", "P2")
+    school = p.get("school")
+    if school is None:
+        v.status, v.missing = ASK, v.missing + ["school"]
+    elif school in ("enrolled", "leave"):
+        v.status = NO
+        v.add("학교에 다니는 중이면 참여할 수 없어요. 단, 최종학년 마지막 학기 재학·휴학생은 참여 가능해요.", "P2")
+    elif school == "last_semester":
+        v.add("최종학년 마지막 학기라 참여할 수 있어요 (재학·성적증명서 제출).", "P2")
+    if p.get("livelihood_benefit") and type1:
+        v.status = NO
+        v.add("생계급여 수급자는 Ⅰ유형에 참여할 수 없어요.", "P2")
+    kst, kend = _program_state(p, "kukchwi")
+    if kst == "receiving":
+        v.status = NOW
+        v.add("지금 국민취업지원제도에 참여 중이에요.", "P2")
+    elif kst == "ended":
+        if kend is None:
+            v.status = CHECK
+            v.add("국민취업지원제도가 끝난 날에 따라 다시 참여할 수 있는지가 달라요 (원칙 3년).", "R15")
+            v.missing.append("kukchwi_end")
+        elif add_months(kend, 36) > today:
+            v.status = NO
+            v.add(f"이전 참여가 끝난 지 3년이 안 돼서 {fmt(add_months(kend, 36))}부터 다시 신청할 수 있어요 (취업으로 끝났으면 단축 가능).", "R15")
 
 
-def timeline_html(tl) -> str:
-    """추천 경로 하나의 타임라인을 HTML 막대 그림으로 만든다 (외부 라이브러리 없이)."""
-    import html as _h
-    total = max(b.start + b.length for b in tl.bars)
-    total = max(total, 6)
-    ticks = "".join(
-        f'<span style="position:absolute;left:{m / total * 100:.2f}%;transform:translateX(-50%);font-size:11px;color:#777">{m}</span>'
-        for m in range(0, total + 1, 2 if total <= 14 else 3))
-    rows = []
-    for b in tl.bars:
-        bg, bd, fg, _ = TL_STYLE.get(b.kind, TL_STYLE["wait"])
-        style = "dashed" if b.unsure else "solid"
-        left, width = b.start / total * 100, b.length / total * 100
-        inner = b.text or ("이때부터 →" if b.kind == "open" else f"{b.length}개월")
-        rows.append(
-            '<div style="display:flex;align-items:center;margin:5px 0">'
-            f'<div style="flex:0 0 38%;font-size:13px;padding-right:8px;color:#333">{_h.escape(b.label)}'
-            f' <code style="font-size:10px">{_h.escape(b.rule)}</code></div>'
-            '<div style="flex:1;position:relative;height:22px;background:repeating-linear-gradient(90deg,#f7f7f7 0,#f7f7f7 1px,transparent 1px,transparent '
-            f'{100 / total:.3f}%);border-radius:4px">'
-            f'<div style="position:absolute;left:{left:.2f}%;width:{width:.2f}%;top:2px;bottom:2px;background:{bg};'
-            f'border:1.5px {style} {bd};border-radius:4px;color:{fg};font-size:11px;line-height:16px;padding-left:4px;'
-            f'white-space:nowrap;overflow:hidden">{_h.escape(inner)}</div></div></div>')
-    legend = " ".join(
-        f'<span style="display:inline-block;margin-right:10px;font-size:12px"><span style="display:inline-block;width:12px;height:12px;'
-        f'background:{bg};border:1.5px solid {bd};border-radius:2px;vertical-align:-2px"></span> {name}</span>'
-        for bg, bd, _, name in TL_STYLE.values())
-    legend += ('<span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;border:1.5px dashed #888;'
-               'border-radius:2px;vertical-align:-2px"></span> 기간이 사람·과정마다 달라 그림 길이는 가정</span>')
-    head = (f'<div style="font-size:12px;color:#555;margin-bottom:4px">0개월 = <b>{_h.escape(tl.anchor)}</b> · 가로축은 개월</div>'
-            '<div style="display:flex"><div style="flex:0 0 38%"></div>'
-            f'<div style="flex:1;position:relative;height:16px">{ticks}</div></div>')
-    note = f'<div style="font-size:12px;color:#555;margin-top:6px">{_h.escape(tl.note)}</div>' if tl.note else ""
-    return f'<div style="padding:4px 2px">{head}{"".join(rows)}<div style="margin-top:8px">{legend}</div>{note}</div>'
+def judge_kukchwi1(p, today, data) -> Verdict:
+    v = Verdict("P2", "국민취업지원제도 Ⅰ유형 (구직촉진수당)", OK)
+    _kukchwi_common(v, p, today, data, type1=True)
+    if v.status in (NO, NOW):
+        return v
+    youth = _youth_age(p)
+    # 6개월 제한: 실업급여(R1), 지자체 지원금·청년수당(R4)
+    waits = []
+    ust, uend = _program_state(p, "unemployment")
+    if ust == "receiving":
+        if uend:
+            waits.append((add_months(uend, 6) + timedelta(days=1), "실업급여가 끝난 다음 날부터 6개월이 지나야 해요.", "R1"))
+        else:
+            v.status = WAIT
+            v.add("실업급여를 받는 동안은 참여할 수 없고, 끝난 다음 날부터 6개월 뒤에 참여할 수 있어요.", "R1")
+    elif ust == "ended" and uend and add_months(uend, 6) + timedelta(days=1) > today:
+        waits.append((add_months(uend, 6) + timedelta(days=1), "실업급여가 끝난 지 6개월이 안 됐어요.", "R1"))
+    yst, yend = _program_state(p, "youth_allowance")
+    if yst == "receiving":
+        if yend:
+            waits.append((add_months(yend, 6), "서울시 청년수당이 끝난 뒤 6개월이 지나야 해요 (최종 판단은 고용센터).", "R4"))
+        else:
+            v.status = WAIT
+            v.add("청년수당을 받는 중이에요. 끝난 뒤 6개월이 지나야 Ⅰ유형에 참여할 수 있어요 (최종 판단은 고용센터).", "R4")
+    elif yst == "ended" and yend and add_months(yend, 6) > today:
+        waits.append((add_months(yend, 6), "서울시 청년수당이 끝난 지 6개월이 안 됐어요 (최종 판단은 고용센터).", "R4"))
+    elif yst == "ended" and yend:
+        v.add("청년수당이 끝난 지 6개월이 지나서 이 제한에는 걸리지 않아요.", "R4")
+    if waits:
+        d, text, rule = max(waits, key=lambda w: w[0])
+        v.status, v.available_from = WAIT, d
+        v.add(f"{text} {fmt(d)}부터 참여할 수 있어요.", rule)
+    # 본인 소득 (R13)
+    own = p.get("own_income")
+    if p.get("working") in ("short", "full") and own is None:
+        v.missing.append("own_income")
+    if own is not None and own >= _own_income_limit(data):
+        v.status = NO
+        v.add(f"본인 월소득이 1인 가구 중위소득 60%({won(_own_income_limit(data))}) 이상이라 제한될 수 있어요.", "R13")
+        return v
+    # 소득·재산
+    band = p.get("household_income_band")
+    if youth is None:
+        pass
+    elif youth:
+        if band in (None, "unknown"):
+            if v.status == OK:
+                v.status = ASK
+            v.missing.append("household_income_band")
+        elif band in ("120to150", "gt150"):
+            v.status = NO
+            v.add("청년특례는 가구 중위소득 120% 이하여야 해요.", "P2")
+            return v
+        else:
+            v.add("청년특례(15~34세, 중위소득 120% 이하) 조건에 맞아요.", "P2")
+        if p.get("assets_over_5eok") is True:
+            v.status = NO
+            v.add("청년특례는 가구 재산이 5억 원 이하여야 해요.", "P2")
+            return v
+        if p.get("assets_over_5eok") is None:
+            v.missing.append("assets_over_5eok")
+    else:
+        if band in (None, "unknown"):
+            v.status = ASK if v.status == OK else v.status
+            v.missing.append("household_income_band")
+        elif band != "le60":
+            v.status = NO
+            v.add("청년이 아니면 가구 중위소득 60% 이하여야 해요.", "P2")
+            return v
+        if p.get("work_exp_100days") is None:
+            v.missing.append("work_exp_100days")
+        elif p.get("work_exp_100days") is False and v.status == OK:
+            v.status = CHECK
+            v.add("최근 2년 취업경험 100일 미만이면 선발형으로 심사돼요. 고용센터에 확인하세요.", "P2")
+    if v.status == OK:
+        v.add("구직촉진수당 월 60만 원 × 6개월을 받을 수 있어요.", "P2")
+    return v
 
 
-def show_timelines(plans):
-    plans = [pl for pl in plans if pl.timeline and pl.timeline.bars]
-    if not plans:
-        return
-    st.markdown("### 📅 한눈에 보는 신청 순서")
-    st.caption("경로마다 언제 무엇을 받고, 언제 무엇이 막히는지 개월 단위로 보여줘요. 날짜와 기간은 규칙표 기준이고, 최종 일정은 각 기관 안내를 따르세요.")
-    tabs = st.tabs([pl.title for pl in plans])
-    for tab, pl in zip(tabs, plans):
-        with tab:
-            st.markdown(timeline_html(pl.timeline), unsafe_allow_html=True)
-
-def show_evidence(rule_ids):
-    for ev in E.evidence(rule_ids, DATA):
-        st.markdown(f"**[{ev['id']}] {ev['title']}** · _{ev['status']}_")
-        st.write(ev["text"])
-        links = [f"[{s['title']}]({s['url']})" if s.get("url") else s["title"] for s in ev["sources"]]
-        if links:
-            st.caption("출처: " + " · ".join(links))
-
-
-def fallback_explain(result) -> str:
-    plans = result["plans"]
-    if not plans:
-        return "지금 정보로는 추천할 경로가 없어요. 아래 제도별 판정과 '정보 필요' 항목을 확인해 주세요."
-    names = ", ".join(pl.title for pl in plans)
-    text = f"지금 상황에서 고려할 수 있는 길은 {names}이에요."
-    if result["insight"]:
-        text += " " + result["insight"].text
-    return text
+def judge_kukchwi2(p, today, data) -> Verdict:
+    v = Verdict("P3", "국민취업지원제도 Ⅱ유형", OK)
+    _kukchwi_common(v, p, today, data, type1=False)
+    if v.status in (NO, NOW):
+        return v
+    ust, uend = _program_state(p, "unemployment")
+    if ust == "receiving":
+        v.status = WAIT
+        v.available_from = uend + timedelta(days=1) if uend else None
+        v.add("실업급여를 받는 동안은 참여할 수 없고, 끝나면 바로 참여할 수 있어요.", "R2")
+    youth = _youth_age(p)
+    if youth is False and v.status == OK:
+        v.status = CHECK
+        v.add("청년이 아니면 저소득층·특정계층 등 조건이 따로 있어요. 고용센터에 확인하세요.", "P3")
+    elif youth and v.status == OK:
+        v.add("청년(15~34세)은 소득·재산과 관계없이 참여할 수 있어요.", "P3")
+    return v
 
 
-def page_result():
-    st.title("🧭 결과")
-    p = st.session_state.profile
-    _pre = E.judge_all(p, TODAY, DATA)
-    _miss = list(dict.fromkeys(m for v in _pre.values() if v.status == E.ASK for m in v.missing))
-    if _miss:
-        names = [v.name for v in _pre.values() if v.status == E.ASK]
-        st.warning("**정보가 비어 있어 판정하지 못한 제도가 있어요:** " + ", ".join(names)
-                   + "\n\n" + "\n".join(f"- {QUESTIONS.get(m, m)}" for m in _miss)
-                   + "\n\n아래 **✏️ 입력 고치기**를 눌러 채우면 다시 판정해요.")
-    result = E.analyze(p, TODAY, DATA)
-    verdicts, plans = result["verdicts"], result["plans"]
-
-    # AI 설명
-    with st.container(border=True):
-        st.markdown("##### 🤖 한눈에 보기")
-        explanation, ai_used = None, False
-        if API_KEY:
-            import json
-            try:
-                with st.spinner("AI가 결과를 쉬운 말로 정리하고 있어요..."):
-                    explanation = cached_explain(json.dumps(E.summary_for_llm(result, p), ensure_ascii=False), tuple(MODELS))
-                ai_used = True
-            except llm.LLMError as e:
-                st.caption(f"AI 설명을 만들지 못해 규칙 결과로 대신 보여드려요. ({e})")
-        st.write(explanation or fallback_explain(result))
-        st.caption("※ AI가 생성한 설명입니다. 판정은 아래 규칙 결과가 기준이에요." if ai_used else "※ 규칙 결과로 만든 요약이에요.")
-
-    if result["insight"]:
-        st.info(f"🔀 **순서가 중요해요** · {result['insight'].text}")
-
-    # 추천 경로
-    st.markdown("### 📍 추천 경로와 신청 순서")
-    if not plans:
-        st.write("지금 정보로는 추천할 경로가 없어요. 아래 제도별 판정을 확인해 주세요.")
-    cols = st.columns(max(1, min(len(plans), 3)))
-    for i, pl in enumerate(plans):
-        with cols[i % len(cols)]:
-            with st.container(border=True):
-                st.markdown(f"#### {pl.title}")
-                st.caption(pl.summary)
-                for n, s in enumerate(pl.steps, 1):
-                    st.markdown(f"**{n}. {s.when}** — {s.what}  `{' '.join(s.rules)}`")
-                st.markdown("**예상 지원금**")
-                for name, monthly, months in pl.money:
-                    if monthly is None:
-                        st.write(f"- {name}: 금액 확인 필요")
-                    else:
-                        st.write(f"- {name}: 월 {monthly:,}원" + (f" × {months}개월" if months else ""))
-                if pl.total():
-                    st.markdown(f"**알 수 있는 금액 합계: 최대 {pl.total():,}원**")
-                for w in pl.warnings:
-                    st.warning(f"{w.text} `{w.rule}`")
-                for ck in pl.checks:
-                    st.info(f"확인 필요: {ck.text} `{ck.rule}`")
-                with st.expander("근거 보기"):
-                    rules = [r for s in pl.steps for r in s.rules] + [w.rule for w in pl.warnings] + [c.rule for c in pl.checks]
-                    show_evidence(rules)
-
-    show_timelines(plans)
-
-    # 제도별 판정
-    st.markdown("### 🗂 제도별 판정")
-    for v in verdicts.values():
-        label = f"{STATUS_ICON.get(v.status, '')} {v.name} — **{v.status}**"
-        if v.available_from:
-            label += f" ({E.fmt(v.available_from)}부터)"
-        with st.expander(label):
-            for r in v.reasons:
-                st.write(f"- {r.text} `{r.rule}`")
-            if v.allowance_note:
-                st.write(f"- 수당: {v.allowance_note}")
-            if v.missing:
-                st.write("- 더 필요한 정보: " + ", ".join(QUESTIONS.get(m, m) for m in v.missing))
-            st.markdown("---")
-            show_evidence([v.pid] + [r.rule for r in v.reasons])
-
-    st.divider()
-    st.caption("⚠️ 이 결과는 공식 공고를 정리한 규칙으로 계산한 참고 정보예요. 최종 자격과 금액은 각 기관(고용센터, 서울시 등)의 심사로 결정돼요. "
-               "'확인 필요' 항목은 고용노동부 상담센터(1350)나 운영기관에 문의하세요.")
-    c1, c2 = st.columns(2)
-    if c1.button("✏️ 입력 고치기", use_container_width=True):
-        go("confirm")
-    if c2.button("🔄 처음부터", use_container_width=True):
-        st.session_state.text = ""
-        st.session_state.profile = {}
-        st.session_state.persona = None
-        go("input")
+def judge_youth_allowance(p, today, data) -> Verdict:
+    v = Verdict("P4", "서울시 청년수당", OK)
+    yst, _ = _program_state(p, "youth_allowance")
+    if yst == "receiving":
+        v.status = NOW
+        v.add("지금 청년수당을 받는 중이에요.", "P4")
+        return v
+    if yst == "ended":
+        v.status = NO
+        v.add("청년수당은 생애 1회만 받을 수 있어요.", "P4")
+        return v
+    seoul = p.get("seoul")
+    if seoul is None:
+        v.status, v.missing = ASK, ["seoul"]
+    elif not seoul:
+        v.status = NO
+        v.add("주민등록상 서울에 살아야 해요.", "P4")
+        return v
+    age = p.get("age")
+    if age is None:
+        v.status = ASK
+        v.missing.append("age")
+    else:
+        extra = min(int(p.get("military_months") or 0), 36) // 12
+        if not (19 <= age <= 34 + extra):
+            v.status = NO
+            v.add("만 19~34세(제대군인은 복무기간만큼 최대 3년 연장)가 대상이에요.", "P4")
+            return v
+    school = p.get("school")
+    if school is None:
+        v.status = ASK
+        v.missing.append("school")
+    elif school != "graduated":
+        v.status = NO
+        v.add("최종학력을 졸업한 뒤 미취업 상태여야 해요. 재학·휴학생은 신청할 수 없어요.", "P4")
+        return v
+    if p.get("working") == "full":
+        v.status = NO
+        v.add("주 30시간 초과이면서 3개월 넘게 일하는 취업자는 신청할 수 없어요.", "P4")
+        return v
+    if p.get("low_income_class"):
+        v.status = NO
+        v.add("기초생활수급자·차상위계층은 신청할 수 없어요.", "P4")
+        return v
+    band = p.get("household_income_band")
+    if band == "gt150":
+        v.status = NO
+        v.add("건강보험료 기준 가구 중위소득 150% 이하여야 해요.", "P4")
+        return v
+    if band in (None, "unknown"):
+        v.status = ASK if v.status == OK else v.status
+        v.missing.append("household_income_band")
+    else:
+        v.add("소득 조건은 건강보험료로 판정해요. 이 결과는 참고용이에요.", "P4")
+    blocks = []
+    ust, uend = _program_state(p, "unemployment")
+    if ust == "receiving":
+        blocks.append((uend, "실업급여를 받는 동안은 신청할 수 없어요.", "R5"))
+    kst, kend = _program_state(p, "kukchwi")
+    if kst == "receiving":
+        blocks.append((kend, "국민취업지원제도에 참여하는 동안은 신청할 수 없어요.", "R3"))
+    if blocks:
+        v.status = WAIT
+        for d, text, rule in blocks:
+            v.add(text + (f" ({fmt(d)} 이후 가능)" if d else ""), rule)
+        known = [d for d, _, _ in blocks if d]
+        v.available_from = max(known) if known else None
+    v.add("모집은 1년에 1~2번이에요. 다음 모집 공고를 확인해야 해요.", "P4")
+    return v
 
 
-def main():
-    init_state()
-    sidebar()
-    {"input": page_input, "confirm": page_confirm, "result": page_result}[st.session_state.stage]()
+def judge_card(p, today, data) -> Verdict:
+    v = Verdict("P5", "국민내일배움카드 (일반 훈련)", OK)
+    if p.get("livelihood_benefit"):
+        v.status = NO
+        v.add("생계급여 수급자는 발급 대상에서 빠져요 (조건부 수급자 등 예외 있음).", "P5")
+        return v
+    school = p.get("school")
+    if school in ("enrolled", "leave"):
+        left = p.get("years_left")
+        if left is None:
+            v.status = ASK
+            v.missing.append("years_left")
+        elif left >= 2:
+            v.status = NO
+            v.add("졸업까지 2년 이상 남은 대학생은 발급받을 수 없어요.", "P5")
+            return v
+    if _program_state(p, "unemployment")[0] == "receiving":
+        v.allowance_note = "실업급여를 받는 동안에는 훈련장려금이 나오지 않아요."
+        v.add(v.allowance_note, "R6")
+    else:
+        v.allowance_note = "140시간 이상 과정, 월 출석률 80% 이상이면 훈련장려금 월 최대 11만 6천 원"
+    if v.status == OK:
+        v.add("카드를 발급받아 훈련비를 지원받을 수 있어요.", "P5")
+    return v
 
 
-main()
+def judge_kdt(p, today, data, card: Verdict) -> Verdict:
+    v = Verdict("P6", "K-디지털 트레이닝 (KDT)", OK)
+    if card.status == NO:
+        v.status = NO
+        v.add("국민내일배움카드를 받을 수 없으면 KDT도 들을 수 없어요.", "P6")
+        return v
+    if p.get("kdt_dropout"):
+        v.status = NO
+        v.add("예전에 KDT를 수료하지 않고 그만둔 적이 있으면 다시 참여할 수 없어요.", "R10")
+        return v
+    if card.status == ASK:
+        v.status, v.missing = ASK, list(card.missing)
+    if _program_state(p, "unemployment")[0] == "receiving":
+        v.allowance_note = "실업급여를 받는 동안에는 훈련장려금이 나오지 않아요."
+        v.add(v.allowance_note, "R6")
+    elif p.get("working") == "full":
+        v.allowance_note = "주 15시간 이상 일하면 훈련장려금 대상이 아닐 수 있어요."
+        v.add(v.allowance_note, "P6")
+    else:
+        v.allowance_note = "실업 상태면 훈련장려금 월 최대 20만 원 (월 출석률 80% 이상)"
+    v.add("수료하지 않고 중간에 그만두면 KDT에 다시 참여할 수 없어요. 일정을 꼭 확인하세요.", "R10")
+    return v
+
+
+def judge_knewdeal(p, today, data) -> Verdict:
+    v = Verdict("P7", "K-뉴딜 아카데미", OK)
+    age = p.get("age")
+    if age is None:
+        v.status, v.missing = ASK, ["age"]
+    elif not (15 <= age <= 34):
+        v.status = NO
+        v.add("15~34세 미취업 청년이 대상이에요.", "P7")
+        return v
+    if p.get("working") == "full":
+        v.status = NO
+        v.add("미취업 청년이 대상이에요.", "P7")
+        return v
+    if p.get("school") in ("enrolled", "leave", "last_semester"):
+        v.status = CHECK
+        v.add("재학생 등 일부는 제외돼요. 지원하려는 아카데미 모집 공고를 확인하세요.", "P7")
+    cap = p.get("training_capital")
+    if cap is None:
+        if "knewdeal" in (p.get("training_interest") or []):
+            v.missing.append("training_capital")
+        v.allowance_note = "훈련수당 수도권 월 최대 30만 원, 비수도권 월 최대 50만 원"
+    else:
+        v.allowance_note = f"훈련수당 월 최대 {'30' if cap else '50'}만 원 ({'수도권' if cap else '비수도권'}, 출석률에 따라)"
+    v.add("다른 수당과 같이 받을 수 있는지는 과정마다 달라요. 아카데미 모집 공고·운영기관 또는 1350에 확인하세요.", "R11")
+    return v
+
+
+def judge_all(p: dict, today: date, data: dict) -> dict[str, Verdict]:
+    card = judge_card(p, today, data)
+    out = {
+        "P1": judge_unemployment(p, today),
+        "P2": judge_kukchwi1(p, today, data),
+        "P3": judge_kukchwi2(p, today, data),
+        "P4": judge_youth_allowance(p, today, data),
+        "P5": card,
+        "P6": judge_kdt(p, today, data, card),
+        "P7": judge_knewdeal(p, today, data),
+    }
+    for v in out.values():  # 중복 제거
+        v.missing = list(dict.fromkeys(v.missing))
+    return out
+
+
+# ---------- 조합·순서 계획 ----------
+def _training_items(p, verdicts, during_unemployment=False):
+    """관심 있는 교육별 (이름, 월 장려금, 개월, 규칙)."""
+    items = []
+    interest = p.get("training_interest") or []
+    if "kdt" in interest and verdicts["P6"].status in (OK, ASK):
+        items.append(("KDT 훈련장려금 (월 최대, 평균 6개월 가정)", None if during_unemployment else 200000, 6, "P6"))
+    if "general" in interest and verdicts["P5"].status in (OK, ASK):
+        items.append(("일반 훈련 훈련장려금 (월 최대, 기간은 과정별)", None if during_unemployment else 116000, None, "P5"))
+    return items
+
+
+def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) -> list[Plan]:
+    plans: list[Plan] = []
+    interest = p.get("training_interest") or []
+    v1, vk1, vk2, vy, vkn = (verdicts[k] for k in ("P1", "P2", "P3", "P4", "P7"))
+    knewdeal_check = Reason("K-뉴딜 아카데미와 같이 받을 수 있는지는 과정마다 달라요. 모집 공고·운영기관에 확인하세요.", "R11")
+
+    # A. 실업급여 먼저
+    if v1.status in (OK, NOW, CHECK) or (v1.status == ASK and (p.get("insured_days_18m") or 0) >= 180):
+        quit_date = to_date(p.get("quit_date"))
+        deadline = add_months(quit_date, 12) if quit_date else None
+        steps = [Step("지금" if v1.status != NOW else "지금 (받는 중)",
+                      "실업급여를 먼저 받아요" + (f". {fmt(deadline)} 전에 다 받아야 해요" if deadline else ""), ["R14"])]
+        if interest:
+            steps.append(Step("실업급여 받는 동안", "국비 훈련은 들을 수 있지만 훈련장려금은 나오지 않아요", ["R6"]))
+        steps.append(Step("실업급여 끝난 다음 날", "국민취업지원제도 Ⅱ유형에 바로 참여할 수 있어요", ["R2"]))
+        steps.append(Step("실업급여 끝나고 6개월 뒤", "국민취업지원제도 Ⅰ유형(구직촉진수당)에 참여할 수 있어요 (소득 조건 충족 시)", ["R1"]))
+        warnings = [Reason("실업급여를 받는 동안에는 서울시 청년수당을 신청할 수 없어요.", "R5")]
+        checks = [knewdeal_check] if "knewdeal" in interest else []
+        plans.append(Plan("unemployment", "실업급여 먼저",
+                          "고용보험 이력이 있으면 기한(12개월)이 있는 실업급여를 먼저 받는 게 보통 유리해요.",
+                          steps, [("실업급여 (고용센터가 산정)", None, None)], warnings, checks))
+
+    # B. 국취 Ⅰ유형 중심
+    if vk1.status in (OK, WAIT, ASK, CHECK):
+        start = vk1.available_from or today
+        steps = [Step("지금" if start <= today else fmt(start) + "부터",
+                      "국민취업지원제도 Ⅰ유형 신청 (심사 약 1개월)", ["P2"] + ([r.rule for r in vk1.reasons if r.rule in ("R1", "R4")][:1]))]
+        money = [("구직촉진수당", 600000, 6)]
+        if interest:
+            steps.append(Step("참여하면서", "국비 훈련을 같이 들으면 구직촉진수당과 훈련장려금을 함께 받아요", ["R7"]))
+            money += [(n, m, mo) for n, m, mo, _ in _training_items(p, verdicts)]
+        warnings = [Reason("국민취업지원제도에 참여하는 동안은 서울시 청년수당을 신청할 수 없어요.", "R3"),
+                    Reason("훈련장려금도 소득으로 신고해야 하고, 다른 소득과 합쳐 기준을 넘으면 수당이 줄 수 있어요.", "R9"),
+                    Reason("끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요.", "R15")]
+        checks = [knewdeal_check] if "knewdeal" in interest else []
+        plans.append(Plan("kukchwi1", "국민취업지원제도 Ⅰ유형 + 교육",
+                          "구직촉진수당(월 60만 원)을 받으면서 국비 교육을 같이 듣는 길이에요.",
+                          steps, money, warnings, checks))
+
+    # C. 청년수당 중심
+    if vy.status in (OK, WAIT, ASK):
+        steps = [Step("다음 모집 때", "서울시 청년수당 신청 (1년에 1~2번 모집, 공고 확인)", ["P4"])]
+        money = [("서울시 청년수당", 500000, 6)]
+        if interest and ("kdt" in interest or "general" in interest):
+            steps.append(Step("받으면서", "KDT·내일배움카드 훈련을 같이 들을 수 있어요", ["R12"]))
+            money += [(n, m, mo) for n, m, mo, _ in _training_items(p, verdicts)]
+        steps.append(Step("청년수당 끝나고 6개월 뒤", "그때부터 국민취업지원제도 Ⅰ유형에 참여할 수 있어요 (최종 판단은 고용센터)", ["R4"]))
+        warnings = [Reason("청년수당은 생애 1번만 받을 수 있어요.", "P4"),
+                    Reason("청년수당이 끝난 뒤 6개월 동안은 국민취업지원제도 Ⅰ유형에 참여할 수 없어요.", "R4")]
+        checks = [knewdeal_check] if "knewdeal" in interest else []
+        plans.append(Plan("youth", "서울시 청년수당 + 교육",
+                          "청년수당(월 50만 원)을 받으면서 국비 교육을 같이 듣는 길이에요. 모집 시기를 기다려야 해요.",
+                          steps, money, warnings, checks))
+
+    # D. 국취 Ⅱ유형 (Ⅰ유형이 안 될 때)
+    if vk2.status in (OK, WAIT) and vk1.status == NO:
+        steps = [Step("지금" if not vk2.available_from else fmt(vk2.available_from) + "부터",
+                      "국민취업지원제도 Ⅱ유형 신청", ["P3"])]
+        money = [("훈련참여지원수당 (금액은 고용센터 확인)", None, None)]
+        if interest:
+            steps.append(Step("참여하면서", "직업훈련을 들으면 훈련참여지원수당과 훈련장려금을 함께 받아요", ["R8"]))
+            money += [(n, m, mo) for n, m, mo, _ in _training_items(p, verdicts)]
+        plans.append(Plan("kukchwi2", "국민취업지원제도 Ⅱ유형 + 교육",
+                          "Ⅰ유형이 어려울 때 소득과 관계없이(청년) 참여할 수 있는 길이에요.",
+                          steps, money,
+                          [Reason("국민취업지원제도에 참여하는 동안은 서울시 청년수당을 신청할 수 없어요.", "R3")],
+                          [knewdeal_check] if "knewdeal" in interest else []))
+
+    # E. K-뉴딜 아카데미
+    if "knewdeal" in interest and vkn.status in (OK, ASK, CHECK):
+        cap = p.get("training_capital")
+        monthly = None if cap is None else (300000 if cap else 500000)
+        plans.append(Plan("knewdeal", "K-뉴딜 아카데미",
+                          "기업이 직접 운영하는 3개월 이상 훈련이에요. 출석률에 따라 훈련수당이 나와요.",
+                          [Step("모집 때", "지원하려는 아카데미 모집 공고 확인 후 지원 (기업별 모집)", ["P7"])],
+                          [("K-뉴딜 훈련수당 (월 최대, 최소 3개월)", monthly, 3)],
+                          [], [knewdeal_check]))
+    for pl in plans:
+        pl.timeline = plan_timeline(pl, p, verdicts, today)
+    return plans
+
+
+def _months_between(a: date, b: date) -> int:
+    """a에서 b까지 개월 수 (올림)."""
+    m = (b.year - a.year) * 12 + (b.month - a.month)
+    if b.day > a.day:
+        m += 1
+    return max(m, 0)
+
+
+def _training_bars(p, verdicts, start: int, no_allowance_rule: str = "") -> list[Bar]:
+    interest = p.get("training_interest") or []
+    bars = []
+    if "kdt" in interest and verdicts["P6"].status in (OK, ASK, CHECK):
+        bars.append(Bar("KDT 교육 (평균 6개월)" + (" · 훈련장려금 없음" if no_allowance_rule else ""), start, 6, "training", no_allowance_rule or "P6", True, "평균 6개월"))
+    if "general" in interest and verdicts["P5"].status in (OK, ASK, CHECK):
+        bars.append(Bar("국비 훈련 (기간은 과정마다 다름)" + (" · 훈련장려금 없음" if no_allowance_rule else ""), start, 6, "training", no_allowance_rule or "P5", True, "과정마다 다름"))
+    return bars
+
+
+def plan_timeline(pl: Plan, p: dict, verdicts: dict[str, Verdict], today: date) -> Timeline | None:
+    """추천 경로의 신청 순서를 개월 단위 막대로 바꾼다. 기간은 규칙표에 있는 값만 쓰고,
+    사람마다 다른 기간(실업급여 수급일수, 교육 기간 등)은 '가정' 표시를 붙인다."""
+    if pl.key == "unemployment":
+        u = 4  # 그림용 길이. 실제 수급일수는 고용센터가 정함
+        bars = [Bar("실업급여 받는 기간 (고용센터가 일수 산정)", 0, u, "money", "P1", True, "기간은 사람마다 다름"),
+                Bar("서울시 청년수당 신청 불가 (받는 동안)", 0, u, "blocked", "R5", False, "실업급여 받는 동안")]
+        bars += _training_bars(p, verdicts, 0, no_allowance_rule="R6")
+        bars += [Bar("국취 Ⅱ유형 바로 참여 가능", u, 3, "open", "R2"),
+                 Bar("국취 Ⅰ유형 기다림", u, 6, "wait", "R1", False, "끝나고 6개월"),
+                 Bar("국취 Ⅰ유형 참여 가능", u + 6, 2, "open", "R1")]
+        quit_date = to_date(p.get("quit_date"))
+        note = f"실업급여는 {fmt(add_months(quit_date, 12))} 전에 다 받아야 해요 (R14)." if quit_date else "실업급여는 퇴사 다음 날부터 12개월 안에 다 받아야 해요 (R14)."
+        return Timeline("지금", bars, note)
+    if pl.key == "kukchwi1":
+        v = verdicts["P2"]
+        off = _months_between(today, v.available_from) if v.available_from and v.available_from > today else 0
+        bars = []
+        if off:
+            rule = next((r.rule for r in v.reasons if r.rule in ("R1", "R4")), "P2")
+            bars.append(Bar(f"참여 제한 ({fmt(v.available_from)}부터 가능)", 0, off, "wait", rule))
+        bars += [Bar("신청·심사 (약 1개월)", off, 1, "wait", "P2"),
+                 Bar("구직촉진수당 월 60만 원 × 6개월", off + 1, 6, "money", "P2")]
+        bars += _training_bars(p, verdicts, off + 1)
+        bars.append(Bar("서울시 청년수당 신청 불가 (참여 중)", off, 7, "blocked", "R3"))
+        return Timeline("지금", bars, "끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요 (R15).")
+    if pl.key == "youth":
+        bars = [Bar("서울시 청년수당 월 50만 원 × 6개월", 0, 6, "money", "P4")]
+        if set(p.get("training_interest") or []) & {"kdt", "general"}:
+            bars += [Bar(b.label, b.start, b.length, b.kind, "R12", b.unsure, b.text) for b in _training_bars(p, verdicts, 0)]
+        bars += [Bar("국취 Ⅰ유형 참여 불가 (끝나고 6개월)", 6, 6, "blocked", "R4"),
+                 Bar("국취 Ⅰ유형 참여 가능", 12, 2, "open", "R4")]
+        return Timeline("청년수당 시작 (다음 모집에 선정된 뒤)", bars, "청년수당은 1년에 1~2번 모집해요. 시작 시기는 공고를 확인하세요 (P4).")
+    if pl.key == "kukchwi2":
+        v = verdicts["P3"]
+        off = _months_between(today, v.available_from) if v.available_from and v.available_from > today else 0
+        bars = ([Bar(f"참여 제한 ({fmt(v.available_from)}부터 가능)", 0, off, "wait", "R2")] if off else [])
+        bars += [Bar("신청·심사 (약 1개월)", off, 1, "wait", "P3"),
+                 Bar("취업지원 참여 (기간은 고용센터 상담으로 정함)", off + 1, 6, "money", "P3", True, "기간은 상담으로 정함")]
+        bars += _training_bars(p, verdicts, off + 1)
+        bars.append(Bar("서울시 청년수당 신청 불가 (참여 중)", off, 7, "blocked", "R3"))
+        return Timeline("지금", bars)
+    if pl.key == "knewdeal":
+        return Timeline("지원하려는 아카데미 모집 시작", [
+            Bar("모집·선발", 0, 1, "wait", "P7", True, "기업별"),
+            Bar("K-뉴딜 교육 (3개월 이상) · 훈련수당", 1, 3, "training", "P7", True, "3개월 이상")],
+            "다른 수당과 같이 받을 수 있는지는 과정마다 달라요 (R11).")
+    return None
+
+
+def order_insight(plans: list[Plan]) -> Reason | None:
+    keys = {pl.key for pl in plans}
+    if "unemployment" in keys:
+        return Reason("실업급여는 12개월 기한이 있어서 보통 먼저 받는 게 유리해요. 받는 동안에는 국민취업지원제도와 청년수당을 신청할 수 없고, "
+                      "끝난 뒤 Ⅱ유형은 바로, Ⅰ유형은 6개월 뒤에 참여할 수 있어요.", "R14·R1·R2·R5")
+    if {"kukchwi1", "youth"} <= keys:
+        return Reason("같은 사람이라도 무엇을 먼저 하느냐에 따라 달라져요. 국민취업지원제도를 먼저 하면 참여하는 동안 청년수당을 신청할 수 없고, "
+                      "청년수당을 먼저 받으면 끝난 뒤 6개월 동안 국민취업지원제도 Ⅰ유형에 참여할 수 없어요. 두 길을 비교해 보세요.", "R3·R4")
+    return None
+
+
+def evidence(rule_ids, data) -> list[dict]:
+    """규칙 ID들의 근거 문장과 출처."""
+    out = []
+    pol = {x["id"]: x for x in data["policies"]}
+    rel = {x["id"]: x for x in data["relations"]}
+    for rid in rule_ids:
+        for one in str(rid).replace("·", ",").split(","):
+            one = one.strip()
+            if one in rel:
+                r = rel[one]
+                out.append({"id": one, "title": f"{r['a']} ↔ {r['b']} ({r['relation']})", "text": r["rule"],
+                            "sources": r["sources"], "status": r["status"]})
+            elif one in pol:
+                x = pol[one]
+                out.append({"id": one, "title": x["name"], "text": f"{x['eligibility']} / {x['caution']}",
+                            "sources": x["sources"], "status": x["status"]})
+    seen, uniq = set(), []
+    for e in out:
+        if e["id"] not in seen:
+            seen.add(e["id"])
+            uniq.append(e)
+    return uniq
+
+
+def analyze(profile: dict, today: date, data: dict | None = None) -> dict:
+    data = data or load_data()
+    verdicts = judge_all(profile, today, data)
+    plans = build_plans(profile, verdicts, today, data)
+    return {"verdicts": verdicts, "plans": plans, "insight": order_insight(plans)}
+
+
+TRAINING_PID = {"general": "P5", "kdt": "P6", "knewdeal": "P7"}
+TRAINING_RULES = {"kdt": {"R10"}, "knewdeal": {"R11"}}
+
+
+def summary_for_llm(result: dict, profile: dict | None = None) -> dict:
+    """AI 설명용 요약. 여기 있는 사실만 설명에 쓰게 한다.
+    관심 없는 교육(KDT·K-뉴딜)의 판정과 주의사항은 빼서 설명이 사용자 상황에 집중하게 한다."""
+    interest = set((profile or {}).get("training_interest") or [])
+    skip_pids = {pid for k, pid in TRAINING_PID.items() if k != "general" and k not in interest}
+    skip_rules = set().union(*(r for k, r in TRAINING_RULES.items() if k not in interest)) if profile is not None else set()
+    if profile is None:
+        skip_pids = set()
+
+    def keep(reason):
+        return reason.rule not in skip_rules
+
+    labels = [TRAININGS[k] for k in TRAININGS if k in interest]
+    return {
+        "관심 교육": labels or ["특정 교육을 고르지 않음"],
+        "판정": [{"정책": v.name, "결과": v.status, "이유": [r.text for r in v.reasons if keep(r)],
+                  "가능 시작일": fmt(v.available_from) if v.available_from else None}
+                 for pid, v in result["verdicts"].items() if pid not in skip_pids],
+        "추천 경로": [{"이름": pl.title, "설명": pl.summary, "순서": [f"{s.when}: {s.what}" for s in pl.steps],
+                       "주의": [w.text for w in pl.warnings if keep(w)],
+                       "확인 필요": [c.text for c in pl.checks if keep(c)],
+                       "예상 합계(알 수 있는 금액만)": won(pl.total()) if pl.total() else "금액 확인 필요"} for pl in result["plans"]],
+        "순서 비교": result["insight"].text if result["insight"] else None,
+    }
