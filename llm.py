@@ -85,6 +85,8 @@ def _client(api_key: str):
     return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))
 
 
+PER_CALL_SECONDS = 20   # 모델 하나를 기다리는 최대 시간
+TOTAL_SECONDS = 45      # 한 번의 AI 작업 전체 최대 시간
 _WORKING_MODEL = None  # 한 번 성공한 모델은 다음 호출에서 먼저 시도 (실패 시도 시간 줄이기)
 
 
@@ -109,15 +111,34 @@ def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mo
     errors = []
     tried = set()
 
+    import concurrent.futures as cf
+    import time
+    pool = cf.ThreadPoolExecutor(max_workers=4)
+    deadline = time.monotonic() + TOTAL_SECONDS
+
+    def _call(model):
+        return client.models.generate_content(model=model, contents=prompt,
+                                              config=_config(types, model, system, json_mode))
+
     def _try(model):
         tried.add(model)
+        left = deadline - time.monotonic()
+        if left <= 1:
+            errors.append(f"{model}: 시간 초과로 건너뜀")
+            return None
+        t0 = time.monotonic()
         try:
-            resp = client.models.generate_content(model=model, contents=prompt,
-                                                  config=_config(types, model, system, json_mode))
+            # 라이브러리 안에서 재시도하며 오래 걸려도, 여기서 정한 시간이 지나면 기다리지 않는다
+            resp = pool.submit(_call, model).result(timeout=min(PER_CALL_SECONDS, left))
+            print(f"[llm] {model} ok {time.monotonic() - t0:.1f}s", flush=True)
             if resp.text:
                 return resp.text
             errors.append(f"{model}: 응답이 비어 있어요.")
+        except cf.TimeoutError:
+            print(f"[llm] {model} timeout", flush=True)
+            errors.append(f"{model}: 응답 시간 초과 (TIMEOUT)")
         except Exception as e:  # 모델 이름 오류·사용량 초과 등
+            print(f"[llm] {model} error: {str(e)[:200]}", flush=True)
             errors.append(f"{model}: {e}")
         return None
 
@@ -125,15 +146,24 @@ def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mo
         out = _try(model)
         if out:
             _WORKING_MODEL = model
+            pool.shutdown(wait=False)
             return out, model
     # 정해 둔 이름이 모두 실패하면, 이 키로 쓸 수 있는 flash 모델 목록에서 찾아본다.
-    for name in _discover_flash(client):
+    try:
+        found = pool.submit(_discover_flash, client).result(timeout=max(1, min(10, deadline - time.monotonic())))
+    except Exception:
+        found = []
+    for name in found:
         if name not in tried:
             out = _try(name)
             if out:
                 _WORKING_MODEL = name
+                pool.shutdown(wait=False)
                 return out, name
+    pool.shutdown(wait=False, cancel_futures=True)
     msg = " | ".join(errors) if errors else "응답이 비어 있어요."
+    if "TIMEOUT" in msg and "429" not in msg:
+        raise LLMError("AI 응답이 너무 늦어요. 잠시 뒤 다시 시도하거나 직접 입력해 주세요.")
     if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
         raise LLMError("무료 사용량 한도에 도달했어요. 잠시 뒤 다시 시도하거나 직접 입력해 주세요.")
     raise LLMError(f"AI 호출에 실패했어요: {errors[0][:200] if errors else msg}")
