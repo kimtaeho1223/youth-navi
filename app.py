@@ -202,6 +202,7 @@ def page_confirm():
         with c[0]:
             p["insured_days_18m"] = num_in(L("퇴사 전 18개월 고용보험 가입 일수 (일한 적 없으면 0)", "insured_days_18m"), p.get("insured_days_18m"), "f_ins", step=30, help="1개월은 약 30일")
             p["quit_date"] = date_in(L("마지막 퇴사일", "quit_date"), p.get("quit_date"), "f_quit")
+            st.caption("'○월'까지만 적었으면 1일로 들어가요. 정확한 날짜로 고쳐 주세요 (실업급여 기한 계산에 쓰여요).")
             p["quit_reason"] = pick(L("퇴사 사유", "quit_reason"), E.QUIT, p.get("quit_reason"), "f_qr")
         with c[1]:
             p["own_income"] = num_in(L("(일하는 중이면) 본인 월소득 (원)", "own_income"), p.get("own_income"), "f_own", step=100000)
