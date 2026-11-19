@@ -96,6 +96,25 @@ class Step:
 
 
 @dataclass
+class Bar:
+    """타임라인 막대 하나. start·length는 '기준 시점'부터 센 개월 수."""
+    label: str
+    start: int
+    length: int
+    kind: str           # money(받는 돈) · training(교육) · wait(기다림·심사) · blocked(신청 불가) · open(이때부터 가능)
+    rule: str = ""
+    unsure: bool = False  # 기간이 사람·과정마다 달라 그림 길이가 가정인 막대
+    text: str = ""        # 막대 안 글자 (비우면 'N개월')
+
+
+@dataclass
+class Timeline:
+    anchor: str          # 0개월이 언제인지 (예: '지금', '청년수당 시작')
+    bars: list[Bar]
+    note: str = ""
+
+
+@dataclass
 class Plan:
     key: str
     title: str
@@ -104,6 +123,7 @@ class Plan:
     money: list[tuple[str, int | None, int | None]]  # (항목, 월 금액, 개월)
     warnings: list[Reason]
     checks: list[Reason]
+    timeline: Timeline | None = None
 
     def total(self) -> int | None:
         tot = 0
@@ -560,7 +580,77 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
                           [Step("모집 때", "지원하려는 아카데미 모집 공고 확인 후 지원 (기업별 모집)", ["P7"])],
                           [("K-뉴딜 훈련수당 (월 최대, 최소 3개월)", monthly, 3)],
                           [], [knewdeal_check]))
+    for pl in plans:
+        pl.timeline = plan_timeline(pl, p, verdicts, today)
     return plans
+
+
+def _months_between(a: date, b: date) -> int:
+    """a에서 b까지 개월 수 (올림)."""
+    m = (b.year - a.year) * 12 + (b.month - a.month)
+    if b.day > a.day:
+        m += 1
+    return max(m, 0)
+
+
+def _training_bars(p, verdicts, start: int, no_allowance_rule: str = "") -> list[Bar]:
+    interest = p.get("training_interest") or []
+    bars = []
+    if "kdt" in interest and verdicts["P6"].status in (OK, ASK, CHECK):
+        bars.append(Bar("KDT 교육 (평균 6개월)" + (" · 훈련장려금 없음" if no_allowance_rule else ""), start, 6, "training", no_allowance_rule or "P6", True, "평균 6개월"))
+    if "general" in interest and verdicts["P5"].status in (OK, ASK, CHECK):
+        bars.append(Bar("국비 훈련 (기간은 과정마다 다름)" + (" · 훈련장려금 없음" if no_allowance_rule else ""), start, 6, "training", no_allowance_rule or "P5", True, "과정마다 다름"))
+    return bars
+
+
+def plan_timeline(pl: Plan, p: dict, verdicts: dict[str, Verdict], today: date) -> Timeline | None:
+    """추천 경로의 신청 순서를 개월 단위 막대로 바꾼다. 기간은 규칙표에 있는 값만 쓰고,
+    사람마다 다른 기간(실업급여 수급일수, 교육 기간 등)은 '가정' 표시를 붙인다."""
+    if pl.key == "unemployment":
+        u = 4  # 그림용 길이. 실제 수급일수는 고용센터가 정함
+        bars = [Bar("실업급여 받는 기간 (고용센터가 일수 산정)", 0, u, "money", "P1", True, "기간은 사람마다 다름"),
+                Bar("서울시 청년수당 신청 불가 (받는 동안)", 0, u, "blocked", "R5", False, "실업급여 받는 동안")]
+        bars += _training_bars(p, verdicts, 0, no_allowance_rule="R6")
+        bars += [Bar("국취 Ⅱ유형 바로 참여 가능", u, 3, "open", "R2"),
+                 Bar("국취 Ⅰ유형 기다림", u, 6, "wait", "R1", False, "끝나고 6개월"),
+                 Bar("국취 Ⅰ유형 참여 가능", u + 6, 2, "open", "R1")]
+        quit_date = to_date(p.get("quit_date"))
+        note = f"실업급여는 {fmt(add_months(quit_date, 12))} 전에 다 받아야 해요 (R14)." if quit_date else "실업급여는 퇴사 다음 날부터 12개월 안에 다 받아야 해요 (R14)."
+        return Timeline("지금", bars, note)
+    if pl.key == "kukchwi1":
+        v = verdicts["P2"]
+        off = _months_between(today, v.available_from) if v.available_from and v.available_from > today else 0
+        bars = []
+        if off:
+            rule = next((r.rule for r in v.reasons if r.rule in ("R1", "R4")), "P2")
+            bars.append(Bar(f"참여 제한 ({fmt(v.available_from)}부터 가능)", 0, off, "wait", rule))
+        bars += [Bar("신청·심사 (약 1개월)", off, 1, "wait", "P2"),
+                 Bar("구직촉진수당 월 60만 원 × 6개월", off + 1, 6, "money", "P2")]
+        bars += _training_bars(p, verdicts, off + 1)
+        bars.append(Bar("서울시 청년수당 신청 불가 (참여 중)", off, 7, "blocked", "R3"))
+        return Timeline("지금", bars, "끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요 (R15).")
+    if pl.key == "youth":
+        bars = [Bar("서울시 청년수당 월 50만 원 × 6개월", 0, 6, "money", "P4")]
+        if set(p.get("training_interest") or []) & {"kdt", "general"}:
+            bars += [Bar(b.label, b.start, b.length, b.kind, "R12", b.unsure, b.text) for b in _training_bars(p, verdicts, 0)]
+        bars += [Bar("국취 Ⅰ유형 참여 불가 (끝나고 6개월)", 6, 6, "blocked", "R4"),
+                 Bar("국취 Ⅰ유형 참여 가능", 12, 2, "open", "R4")]
+        return Timeline("청년수당 시작 (다음 모집에 선정된 뒤)", bars, "청년수당은 1년에 1~2번 모집해요. 시작 시기는 공고를 확인하세요 (P4).")
+    if pl.key == "kukchwi2":
+        v = verdicts["P3"]
+        off = _months_between(today, v.available_from) if v.available_from and v.available_from > today else 0
+        bars = ([Bar(f"참여 제한 ({fmt(v.available_from)}부터 가능)", 0, off, "wait", "R2")] if off else [])
+        bars += [Bar("신청·심사 (약 1개월)", off, 1, "wait", "P3"),
+                 Bar("취업지원 참여 (기간은 고용센터 상담으로 정함)", off + 1, 6, "money", "P3", True, "기간은 상담으로 정함")]
+        bars += _training_bars(p, verdicts, off + 1)
+        bars.append(Bar("서울시 청년수당 신청 불가 (참여 중)", off, 7, "blocked", "R3"))
+        return Timeline("지금", bars)
+    if pl.key == "knewdeal":
+        return Timeline("지원하려는 아카데미 모집 시작", [
+            Bar("모집·선발", 0, 1, "wait", "P7", True, "기업별"),
+            Bar("K-뉴딜 교육 (3개월 이상) · 훈련수당", 1, 3, "training", "P7", True, "3개월 이상")],
+            "다른 수당과 같이 받을 수 있는지는 과정마다 달라요 (R11).")
+    return None
 
 
 def order_insight(plans: list[Plan]) -> Reason | None:
