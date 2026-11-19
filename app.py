@@ -240,6 +240,62 @@ def page_confirm():
 
 
 # ---------------- 3. 결과·근거 ----------------
+TL_STYLE = {  # kind: (배경, 테두리, 글자, 범례 이름)
+    "money": ("#d9f2e3", "#2e9e5b", "#14532d", "받는 돈"),
+    "training": ("#dbe8fb", "#3b73c9", "#1e3a6e", "교육"),
+    "wait": ("#ececec", "#9a9a9a", "#3f3f3f", "심사·기다림"),
+    "blocked": ("#fde2e2", "#d64545", "#7f1d1d", "신청 불가"),
+    "open": ("#fff1c9", "#d49a00", "#6b4e00", "이때부터 가능"),
+}
+
+
+def timeline_html(tl) -> str:
+    """추천 경로 하나의 타임라인을 HTML 막대 그림으로 만든다 (외부 라이브러리 없이)."""
+    import html as _h
+    total = max(b.start + b.length for b in tl.bars)
+    total = max(total, 6)
+    ticks = "".join(
+        f'<span style="position:absolute;left:{m / total * 100:.2f}%;transform:translateX(-50%);font-size:11px;color:#777">{m}</span>'
+        for m in range(0, total + 1, 2 if total <= 14 else 3))
+    rows = []
+    for b in tl.bars:
+        bg, bd, fg, _ = TL_STYLE.get(b.kind, TL_STYLE["wait"])
+        style = "dashed" if b.unsure else "solid"
+        left, width = b.start / total * 100, b.length / total * 100
+        inner = b.text or ("이때부터 →" if b.kind == "open" else f"{b.length}개월")
+        rows.append(
+            '<div style="display:flex;align-items:center;margin:5px 0">'
+            f'<div style="flex:0 0 38%;font-size:13px;padding-right:8px;color:#333">{_h.escape(b.label)}'
+            f' <code style="font-size:10px">{_h.escape(b.rule)}</code></div>'
+            '<div style="flex:1;position:relative;height:22px;background:repeating-linear-gradient(90deg,#f7f7f7 0,#f7f7f7 1px,transparent 1px,transparent '
+            f'{100 / total:.3f}%);border-radius:4px">'
+            f'<div style="position:absolute;left:{left:.2f}%;width:{width:.2f}%;top:2px;bottom:2px;background:{bg};'
+            f'border:1.5px {style} {bd};border-radius:4px;color:{fg};font-size:11px;line-height:16px;padding-left:4px;'
+            f'white-space:nowrap;overflow:hidden">{_h.escape(inner)}</div></div></div>')
+    legend = " ".join(
+        f'<span style="display:inline-block;margin-right:10px;font-size:12px"><span style="display:inline-block;width:12px;height:12px;'
+        f'background:{bg};border:1.5px solid {bd};border-radius:2px;vertical-align:-2px"></span> {name}</span>'
+        for bg, bd, _, name in TL_STYLE.values())
+    legend += ('<span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;border:1.5px dashed #888;'
+               'border-radius:2px;vertical-align:-2px"></span> 기간이 사람·과정마다 달라 그림 길이는 가정</span>')
+    head = (f'<div style="font-size:12px;color:#555;margin-bottom:4px">0개월 = <b>{_h.escape(tl.anchor)}</b> · 가로축은 개월</div>'
+            '<div style="display:flex"><div style="flex:0 0 38%"></div>'
+            f'<div style="flex:1;position:relative;height:16px">{ticks}</div></div>')
+    note = f'<div style="font-size:12px;color:#555;margin-top:6px">{_h.escape(tl.note)}</div>' if tl.note else ""
+    return f'<div style="padding:4px 2px">{head}{"".join(rows)}<div style="margin-top:8px">{legend}</div>{note}</div>'
+
+
+def show_timelines(plans):
+    plans = [pl for pl in plans if pl.timeline and pl.timeline.bars]
+    if not plans:
+        return
+    st.markdown("### 📅 한눈에 보는 신청 순서")
+    st.caption("경로마다 언제 무엇을 받고, 언제 무엇이 막히는지 개월 단위로 보여줘요. 날짜와 기간은 규칙표 기준이고, 최종 일정은 각 기관 안내를 따르세요.")
+    tabs = st.tabs([pl.title for pl in plans])
+    for tab, pl in zip(tabs, plans):
+        with tab:
+            st.markdown(timeline_html(pl.timeline), unsafe_allow_html=True)
+
 def show_evidence(rule_ids):
     for ev in E.evidence(rule_ids, DATA):
         st.markdown(f"**[{ev['id']}] {ev['title']}** · _{ev['status']}_")
@@ -318,6 +374,8 @@ def page_result():
                 with st.expander("근거 보기"):
                     rules = [r for s in pl.steps for r in s.rules] + [w.rule for w in pl.warnings] + [c.rule for c in pl.checks]
                     show_evidence(rules)
+
+    show_timelines(plans)
 
     # 제도별 판정
     st.markdown("### 🗂 제도별 판정")
