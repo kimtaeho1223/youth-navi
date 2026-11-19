@@ -80,24 +80,40 @@ def _client(api_key: str):
         from google import genai  # google-genai 패키지
     except ImportError as e:
         raise LLMError("google-genai 패키지가 설치되어 있지 않아요 (requirements.txt 확인).") from e
-    return genai.Client(api_key=api_key)
+    from google.genai import types
+    # 한 번 호출이 25초를 넘으면 끊고 다음 모델로 넘어간다 (무한 대기 방지)
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))
 
 
-def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mode: bool) -> str:
+_WORKING_MODEL = None  # 한 번 성공한 모델은 다음 호출에서 먼저 시도 (실패 시도 시간 줄이기)
+
+
+def _config(types, model: str, system: str, json_mode: bool):
+    kw = dict(system_instruction=system, temperature=0,
+              response_mime_type="application/json" if json_mode else "text/plain")
+    if "2.5" in model:
+        # 2.5 모델은 기본으로 '생각(thinking)'을 해서 느림. 정리·설명은 생각이 필요 없어 끔
+        kw["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+    return types.GenerateContentConfig(**kw)
+
+
+def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mode: bool) -> tuple[str, str]:
+    """(응답 글, 실제로 응답한 모델 이름)을 돌려준다."""
+    global _WORKING_MODEL
     from google.genai import types
     client = _client(api_key)
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        temperature=0,
-        response_mime_type="application/json" if json_mode else "text/plain",
-    )
+    if _WORKING_MODEL and _WORKING_MODEL in models:
+        models = [_WORKING_MODEL] + [m for m in models if m != _WORKING_MODEL]
+    elif _WORKING_MODEL:
+        models = [_WORKING_MODEL] + list(models)
     errors = []
     tried = set()
 
     def _try(model):
         tried.add(model)
         try:
-            resp = client.models.generate_content(model=model, contents=prompt, config=config)
+            resp = client.models.generate_content(model=model, contents=prompt,
+                                                  config=_config(types, model, system, json_mode))
             if resp.text:
                 return resp.text
             errors.append(f"{model}: 응답이 비어 있어요.")
@@ -108,13 +124,15 @@ def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mo
     for model in models:
         out = _try(model)
         if out:
-            return out
+            _WORKING_MODEL = model
+            return out, model
     # 정해 둔 이름이 모두 실패하면, 이 키로 쓸 수 있는 flash 모델 목록에서 찾아본다.
     for name in _discover_flash(client):
         if name not in tried:
             out = _try(name)
             if out:
-                return out
+                _WORKING_MODEL = name
+                return out, name
     msg = " | ".join(errors) if errors else "응답이 비어 있어요."
     if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
         raise LLMError("무료 사용량 한도에 도달했어요. 잠시 뒤 다시 시도하거나 직접 입력해 주세요.")
@@ -138,11 +156,11 @@ def _discover_flash(client) -> list[str]:
     return names[:5]
 
 
-def extract_profile(text: str, today_iso: str, api_key: str, models: list[str]) -> tuple[dict, int]:
-    """상황 문장 → 프로필 dict. (가린 개인정보 수도 함께 돌려준다)"""
+def extract_profile(text: str, today_iso: str, api_key: str, models: list[str]) -> tuple[dict, int, str]:
+    """상황 문장 → (프로필 dict, 가린 개인정보 수, 응답한 모델 이름)."""
     masked, n = mask_pii(text)
     prompt = f"오늘 날짜: {today_iso}\n\n출력 JSON 형식:\n{PROFILE_SCHEMA}\n\n사용자 문장:\n\"\"\"{masked}\"\"\""
-    raw = _generate(api_key, models, EXTRACT_SYSTEM, prompt, json_mode=True)
+    raw, model = _generate(api_key, models, EXTRACT_SYSTEM, prompt, json_mode=True)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
@@ -150,7 +168,7 @@ def extract_profile(text: str, today_iso: str, api_key: str, models: list[str]) 
         if not m:
             raise LLMError("AI 응답을 읽지 못했어요. 직접 입력해 주세요.")
         data = json.loads(m.group(0))
-    return clean_profile(data), n
+    return clean_profile(data), n, model
 
 
 ALLOWED = {
@@ -202,6 +220,8 @@ EXPLAIN_SYSTEM = """너는 청년 지원제도 상담 서비스의 '설명' 담�
 """
 
 
-def explain(summary: dict, api_key: str, models: list[str]) -> str:
+def explain(summary: dict, api_key: str, models: list[str]) -> tuple[str, str]:
+    """판정 요약 → (쉬운 설명, 응답한 모델 이름)."""
     prompt = "판정 결과(JSON):\n" + json.dumps(summary, ensure_ascii=False, indent=1)
-    return _generate(api_key, models, EXPLAIN_SYSTEM, prompt, json_mode=False).strip()
+    text, model = _generate(api_key, models, EXPLAIN_SYSTEM, prompt, json_mode=False)
+    return text.strip(), model
