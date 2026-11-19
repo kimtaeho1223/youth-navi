@@ -120,8 +120,15 @@ def run_extract():
         go("confirm")
     try:
         with st.spinner("AI가 상황을 정리하고 있어요..."):
-            profile, masked = cached_extract(text, TODAY.isoformat(), tuple(MODELS))
-        msg = "AI가 정리한 내용이에요. 틀린 곳은 고치고, 빈 곳은 채워주세요."
+            profile, masked, model = cached_extract(text, TODAY.isoformat(), tuple(MODELS))
+        msg = f"AI({model})가 정리한 내용이에요. 틀린 곳은 고치고, 빈 곳은 채워주세요."
+        if persona:
+            # 예시 인물: AI가 비워 둔 칸만 미리 정해 둔 가상 인물 값으로 채운다 (AI가 정리한 값은 그대로 둠)
+            filled = [k for k, v in PERSONAS[persona]["profile"].items() if profile.get(k) in (None, [], "")]
+            for k in filled:
+                profile[k] = PERSONAS[persona]["profile"][k]
+            if filled:
+                msg += f" 예시 인물이라 AI가 비워 둔 {len(filled)}칸은 미리 정해 둔 값으로 채웠어요."
         if masked:
             msg += f" (개인정보로 보이는 내용 {masked}개는 AI에 보내기 전에 가렸어요.)"
         st.session_state.profile = profile
@@ -332,17 +339,18 @@ def page_result():
     # AI 설명
     with st.container(border=True):
         st.markdown("##### 🤖 한눈에 보기")
-        explanation, ai_used = None, False
+        explanation, ai_used, model = None, False, None
         if API_KEY:
             import json
             try:
                 with st.spinner("AI가 결과를 쉬운 말로 정리하고 있어요..."):
-                    explanation = cached_explain(json.dumps(E.summary_for_llm(result, p), ensure_ascii=False), tuple(MODELS))
+                    explanation, model = cached_explain(json.dumps(E.summary_for_llm(result, p), ensure_ascii=False), tuple(MODELS))
                 ai_used = True
             except llm.LLMError as e:
                 st.caption(f"AI 설명을 만들지 못해 규칙 결과로 대신 보여드려요. ({e})")
         st.write(explanation or fallback_explain(result))
-        st.caption("※ AI가 생성한 설명입니다. 판정은 아래 규칙 결과가 기준이에요." if ai_used else "※ 규칙 결과로 만든 요약이에요.")
+        st.caption(f"※ AI가 생성한 설명입니다 (Google Gemini · {model}). 판정은 아래 규칙 결과가 기준이에요." if ai_used
+                   else "※ 규칙 결과로 만든 요약이에요.")
 
     if result["insight"]:
         st.info(f"🔀 **순서가 중요해요** · {result['insight'].text}")
