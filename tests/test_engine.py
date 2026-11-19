@@ -47,7 +47,7 @@ v, plans, _ = run("T4")
 print("T4 마지막 학기 재학생")
 ok &= check("청년수당 불가 (재학생)", v["P4"].status == NO)
 ok &= check("내일배움카드 가능 (졸업 2년 미만)", v["P5"].status == OK)
-ok &= check("국취 Ⅰ유형: 마지막 학기 예외 인정 + 소득 정보 필요", v["P2"].status != NO and "household_income_band" in v["P2"].missing)
+ok &= check("국취 Ⅰ유형: 마지막 학기 예외 인정 → 가능", v["P2"].status == OK and any("마지막 학기" in r.text for r in v["P2"].reasons))
 
 v, plans, _ = run("T5")
 print("T5 부산 K-뉴딜")
