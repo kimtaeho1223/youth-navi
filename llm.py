@@ -11,7 +11,7 @@ import json
 import re
 
 # 정식 모델 이름을 먼저 시도하고, 모두 안 되면 내 키로 쓸 수 있는 flash 모델을 자동으로 찾는다.
-DEFAULT_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.0-flash"]
+DEFAULT_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.7-flash"]  # 11/19: 2.x 모델은 404(종료)
 
 
 class LLMError(Exception):
@@ -85,18 +85,26 @@ def _client(api_key: str):
     return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))
 
 
-PER_CALL_SECONDS = 20   # 모델 하나를 기다리는 최대 시간
-TOTAL_SECONDS = 45      # 한 번의 AI 작업 전체 최대 시간
+PER_CALL_SECONDS = 25   # 모델 하나를 기다리는 최대 시간
+TOTAL_SECONDS = 60      # 한 번의 AI 작업 전체 최대 시간
 _WORKING_MODEL = None  # 한 번 성공한 모델은 다음 호출에서 먼저 시도 (실패 시도 시간 줄이기)
 
 
 def _config(types, model: str, system: str, json_mode: bool):
     kw = dict(system_instruction=system, temperature=0,
               response_mime_type="application/json" if json_mode else "text/plain")
-    if "2.5" in model:
-        # 2.5 모델은 기본으로 '생각(thinking)'을 해서 느림. 정리·설명은 생각이 필요 없어 끔
-        kw["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-    return types.GenerateContentConfig(**kw)
+    # Gemini는 답하기 전에 '생각(thinking)'을 해서 느림. 정리·설명은 깊은 생각이 필요 없어 최소로 줄임
+    try:
+        if "2.5" in model:
+            kw["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        elif "lite" in model:
+            kw["thinking_config"] = types.ThinkingConfig(thinking_level="minimal")
+        else:  # 3.7·3.8 Flash는 minimal을 지원하지 않아 low가 가장 낮은 단계
+            kw["thinking_config"] = types.ThinkingConfig(thinking_level="low")
+        return types.GenerateContentConfig(**kw)
+    except Exception:  # 라이브러리가 옛 버전이라 설정을 모르면 기본값으로
+        kw.pop("thinking_config", None)
+        return types.GenerateContentConfig(**kw)
 
 
 def _generate(api_key: str, models: list[str], system: str, prompt: str, json_mode: bool) -> tuple[str, str]:
@@ -181,8 +189,8 @@ def _discover_flash(client) -> list[str]:
                 names.append(name)
     except Exception:
         return []
-    # lite가 아닌 것 → 최신 버전 순으로
-    names.sort(key=lambda n: ("lite" in n, "preview" in n or "exp" in n, [-ord(c) for c in n]))
+    # 빠른 lite 먼저 → 정식(미리보기 아님) → 최신 버전 순으로
+    names.sort(key=lambda n: ("lite" not in n, "preview" in n or "exp" in n, [-ord(c) for c in n]))
     return names[:5]
 
 
