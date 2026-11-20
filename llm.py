@@ -264,3 +264,37 @@ def explain(summary: dict, api_key: str, models: list[str]) -> tuple[str, str]:
     prompt = "판정 결과(JSON):\n" + json.dumps(summary, ensure_ascii=False, indent=1)
     text, model = _generate(api_key, models, EXPLAIN_SYSTEM, prompt, json_mode=False)
     return text.strip(), model
+
+
+ASK_SYSTEM = """너는 청년 지원제도 상담 서비스의 '질문 답변' 담당이다.
+'내 판정 결과'와 '규칙표'는 공식 자료를 정리한 것이다. 사용자의 질문에 이 두 자료만으로 답한다.
+규칙:
+1. 두 자료에 있는 사실만 쓴다. 자료에 없는 조건·금액·날짜·제도·예외는 절대 만들지 않는다.
+2. 자료로 답할 수 없으면 '이 서비스의 규칙표에는 그 내용이 없어요'라고 먼저 말하고,
+   고용노동부 고객상담센터(1350)나 해당 기관에 확인하라고 안내한다. 추측해서 덧붙이지 않는다.
+3. 판정 결과를 바꾸거나 뒤집지 않는다. '확인 필요'인 내용은 확인이 필요하다고 그대로 말한다.
+4. 답에 쓴 근거의 ID를 문장 끝에 [R4], [P2]처럼 붙인다. 자료에 없는 ID는 쓰지 않는다.
+5. 청년 지원제도와 관계없는 질문(날씨, 잡담, 다른 분야 등)에는 '이 서비스는 청년 지원금·교육 제도의 조합과 순서만 도와드려요'라고만 답한다.
+6. 이름·연락처·주민번호 같은 개인정보를 묻거나 요구하지 않는다. 질문에 [가림] 표시가 있으면 그 부분은 무시한다.
+7. 친근한 존댓말(~해요)로 2~5문장, 마크다운 없이 쓴다.
+"""
+
+
+def answer(question: str, verdict_summary: dict, rules: list[dict], api_key: str, models: list[str]) -> tuple[str, str, int]:
+    """질문 → (답변, 응답한 모델, 가린 개인정보 수). 판정 결과와 규칙표만 근거로 쓴다."""
+    q, n = mask_pii(question.strip()[:300])
+    prompt = ("내 판정 결과(JSON):\n" + json.dumps(verdict_summary, ensure_ascii=False)
+              + "\n\n규칙표(JSON):\n" + json.dumps(rules, ensure_ascii=False)
+              + "\n\n사용자 질문:\n" + q)
+    text, model = _generate(api_key, models, ASK_SYSTEM, prompt, json_mode=False)
+    return text.strip(), model, n
+
+
+def cited_ids(text: str) -> list[str]:
+    """답변에 붙은 근거 ID([R4], [P2] 등)를 순서대로 뽑는다."""
+    import re as _re
+    out = []
+    for m in _re.findall(r"\b([PR]\d{1,2})\b", text):
+        if m not in out:
+            out.append(m)
+    return out
