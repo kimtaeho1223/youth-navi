@@ -75,7 +75,9 @@ EXTRACT_SYSTEM = """너는 청년 지원제도 상담 서비스의 '입력 정�
 6. 날짜에 '일'이 없고 '월'까지만 있으면 그 달 1일로 쓴다 (예: 2026년 9월 → 2026-09-01). 사용자가 확인 화면에서 고칠 수 있다.
 7. 4대보험(고용보험)이 되는 곳(정규직·계약직·4대보험 되는 알바)에서 일한 기간이 나오면 insured_days_18m = 개월 수 × 30 으로 쓴다.
    18개월(540일)을 넘으면 540으로 쓴다. 4대보험 여부를 알 수 없는 알바는 null로 둔다.
-8. livelihood_benefit(생계급여)은 '생계급여'라는 말이 있을 때만 true로 쓴다. '기초생활수급', '차상위'라고만 하면 low_income_class만 true이고 livelihood_benefit은 null이다.
+8. unemployment_status·kukchwi_status·youth_allowance_status는 '받는 중', '받았다/끝났다', '받은 적 없다'처럼 상태를 말했을 때만 쓴다.
+   '해보려고요', '궁금해요'처럼 앞으로의 관심만 있으면 null로 둔다.
+9. livelihood_benefit(생계급여)은 '생계급여'라는 말이 있을 때만 true로 쓴다. '기초생활수급', '차상위'라고만 하면 low_income_class만 true이고 livelihood_benefit은 null이다.
 """
 
 
