@@ -265,6 +265,8 @@ def judge_kukchwi1(p, today, data) -> Verdict:
     own = p.get("own_income")
     if p.get("working") in ("short", "full") and own is None:
         v.missing.append("own_income")
+        if v.status == OK:  # 일하는 중이면 본인 소득을 알아야 판정 가능 (R13)
+            v.status = ASK
     if own is not None and own >= _own_income_limit(data):
         v.status = NO
         v.add(f"본인 월소득이 1인 가구 중위소득 60%({won(_own_income_limit(data))}) 이상이라 제한될 수 있어요.", "R13")
@@ -741,3 +743,62 @@ def rules_context(data: dict | None = None) -> list[dict]:
 def known_ids(data: dict | None = None) -> set[str]:
     data = data or load_data()
     return {p["id"] for p in data["policies"]} | {r["id"] for r in data["relations"]}
+
+
+FIELD_LABELS = {
+    "age": "만 나이", "military_months": "군 복무 개월 수", "seoul": "서울 거주", "school": "학교",
+    "years_left": "졸업까지 남은 햇수", "working": "일하는 상태", "own_income": "본인 월소득",
+    "insured_days_18m": "고용보험 가입 일수(18개월)", "quit_date": "마지막 퇴사일", "quit_reason": "퇴사 사유",
+    "work_exp_100days": "최근 2년 일한 기간 100일 이상", "household_size": "가구원 수",
+    "household_income_band": "가구소득 구간", "assets_over_5eok": "가구 재산 5억 원 초과",
+    "livelihood_benefit": "생계급여 수급", "low_income_class": "기초생활수급·차상위",
+    "unemployment_status": "실업급여", "unemployment_end": "실업급여 종료일",
+    "kukchwi_status": "국민취업지원제도", "kukchwi_end": "국민취업지원제도 종료일",
+    "youth_allowance_status": "서울시 청년수당", "youth_allowance_end": "청년수당 종료일",
+    "has_card": "내일배움카드 보유", "kdt_dropout": "KDT 중도 포기 이력", "training_interest": "관심 교육",
+    "training_capital": "교육 장소 수도권",
+}
+_VALUE_LABELS = {"school": SCHOOL, "working": WORK, "quit_reason": QUIT, "household_income_band": BAND,
+                 "unemployment_status": STATUS3, "kukchwi_status": STATUS3, "youth_allowance_status": STATUS3}
+
+
+def field_text(key: str, value) -> str:
+    """프로필 값 하나를 사람이 읽는 글로."""
+    if value is None or value == []:
+        return "모름"
+    if key in _VALUE_LABELS:
+        return _VALUE_LABELS[key].get(value, str(value))
+    if key == "training_interest":
+        return ", ".join(TRAININGS.get(x, x) for x in value)
+    if isinstance(value, bool):
+        return "예" if value else "아니요"
+    if key == "own_income":
+        return won(value)
+    return str(value)
+
+
+def compare_scenario(profile: dict, changes: dict, today: date, months_later: int = 0,
+                     data: dict | None = None) -> dict:
+    """'만약에' 비교: 바뀐 조건으로 규칙 엔진을 다시 돌려 지금과 비교한다. 판정은 여기서만 한다."""
+    data = data or load_data()
+    before = analyze(profile, today, data)
+    new_profile = {**profile, **changes}
+    when = add_months(today, months_later) if months_later else today
+    after = analyze(new_profile, when, data)
+    rows = []
+    for pid, v in before["verdicts"].items():
+        a = after["verdicts"][pid]
+        rows.append({"pid": pid, "name": v.name, "before": v.status, "after": a.status,
+                     "after_from": fmt(a.available_from) if a.available_from else None,
+                     "changed": v.status != a.status or v.available_from != a.available_from,
+                     "after_reasons": [r.text for r in a.reasons], "rules": [r.rule for r in a.reasons]})
+    plans = lambda res: [{"title": pl.title, "total": pl.total()} for pl in res["plans"]]
+    return {
+        "changes": [{"key": k, "label": FIELD_LABELS.get(k, k), "before": field_text(k, profile.get(k)),
+                     "after": field_text(k, v)} for k, v in changes.items() if profile.get(k) != v],
+        "when": fmt(when), "months_later": months_later,
+        "rows": rows,
+        "plans_before": plans(before), "plans_after": plans(after),
+        "insight_before": before["insight"].text if before["insight"] else None,
+        "insight_after": after["insight"].text if after["insight"] else None,
+    }
