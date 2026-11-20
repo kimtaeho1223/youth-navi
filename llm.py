@@ -299,3 +299,56 @@ def cited_ids(text: str) -> list[str]:
         if m not in out:
             out.append(m)
     return out
+
+
+SCENARIO_SYSTEM = """너는 청년 지원제도 상담 서비스의 '만약에' 담당이다.
+사용자의 '만약에' 질문을, 사용자 프로필에서 바뀌는 항목(JSON)으로 바꾼다. 자격 판정은 하지 않는다(규칙 엔진이 한다).
+출력은 JSON 하나: {"understood": "질문을 한 문장으로 다시 쓴 것", "changes": {바뀌는 항목만}, "months_later": 정수 또는 null}
+규칙:
+1. changes에는 아래 '프로필 항목'의 키와 허용 값만 쓴다. 질문에서 바뀐다고 한 것만 넣고, 나머지는 넣지 않는다.
+2. 시점이 미래이면 months_later에 오늘부터 몇 개월 뒤인지 쓴다 (예: '6개월 뒤', '내년 3월'). 시점이 없으면 null.
+3. 예: '취업하면?' → {"working": "full"} / '청년수당을 지금 받고 있다면?' → {"youth_allowance_status": "receiving"}
+   '실업급여를 다 받고 끝났다면?' → {"unemployment_status": "ended", "unemployment_end": 끝난 날짜} /
+   '서울로 이사하면?' → {"seoul": true} / '졸업하면?' → {"school": "graduated"}
+4. 지원제도 조건과 관계없는 질문이거나 항목으로 바꿀 수 없으면 changes를 {}로 둔다. 추측해서 채우지 않는다.
+"""
+
+
+def understand_scenario(question: str, profile: dict, today_iso: str, api_key: str, models: list[str]) -> tuple[dict, int, str]:
+    """'만약에' 질문 → ({understood, changes, months_later}, 가린 개인정보 수, 모델)."""
+    q, n = mask_pii(question.strip()[:300])
+    prompt = (f"오늘 날짜: {today_iso}\n프로필 항목:{PROFILE_SCHEMA}\n지금 사용자 프로필(JSON):\n"
+              + json.dumps(profile, ensure_ascii=False, default=str) + "\n\n'만약에' 질문:\n" + q)
+    raw, model = _generate(api_key, models, SCENARIO_SYSTEM, prompt, json_mode=True)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("{"), raw.rfind("}")
+        data = json.loads(raw[start:end + 1]) if start >= 0 else {}
+    changes = clean_profile(data.get("changes") or {})
+    ml = data.get("months_later")
+    try:
+        ml = int(ml) if ml is not None else 0
+    except (TypeError, ValueError):
+        ml = 0
+    ml = max(0, min(ml, 36))
+    return {"understood": str(data.get("understood") or "")[:200], "changes": changes, "months_later": ml}, n, model
+
+
+DIFF_SYSTEM = """너는 청년 지원제도 상담 서비스의 '비교 설명' 담당이다.
+'지금'과 '만약에'의 판정 비교(JSON)는 규칙 엔진이 공식 규칙으로 계산한 것이다. 무엇이 달라지는지 쉽게 설명한다.
+규칙:
+1. 비교 결과에 있는 사실만 쓴다. 새로운 조건·금액·날짜·제도를 추가하지 않고, 판정을 바꾸지 않는다.
+2. 달라지는 제도를 먼저, 그 이유를 짧게 쓴다. 달라지는 게 없으면 '이 조건에서는 판정이 달라지지 않아요'라고 쓴다.
+3. 근거 ID가 있으면 문장 끝에 [R3]처럼 붙인다. 친근한 존댓말(~해요), 3~5문장, 마크다운 없이 쓴다.
+"""
+
+
+def explain_diff(diff: dict, api_key: str, models: list[str]) -> tuple[str, str]:
+    slim = {"바뀐 조건": diff["changes"], "기준 시점": diff["when"],
+            "달라진 판정": [{k: r[k] for k in ("name", "before", "after", "after_from", "after_reasons", "rules")}
+                         for r in diff["rows"] if r["changed"]],
+            "추천 경로 금액(지금)": diff["plans_before"], "추천 경로 금액(만약에)": diff["plans_after"],
+            "순서 안내(만약에)": diff["insight_after"]}
+    text, model = _generate(api_key, models, DIFF_SYSTEM, "비교 결과(JSON):\n" + json.dumps(slim, ensure_ascii=False), json_mode=False)
+    return text.strip(), model
