@@ -723,3 +723,21 @@ def summary_for_llm(result: dict, profile: dict | None = None) -> dict:
                        "예상 합계(알 수 있는 금액만)": won(pl.total()) if pl.total() else "금액 확인 필요"} for pl in result["plans"]],
         "순서 비교": result["insight"].text if result["insight"] else None,
     }
+
+
+def rules_context(data: dict | None = None) -> list[dict]:
+    """AI 질문 답변에 넘길 규칙표 전체 요약 (P1~P7, R1~R15). 출처 확인 상태도 함께."""
+    data = data or load_data()
+    out = []
+    for p in data["policies"]:
+        out.append({"ID": p["id"], "제도": p["name"], "자격": p["eligibility"], "지원": p["benefit"],
+                    "제외·주의": p["caution"], "신청 시기": p.get("timing"), "확인 상태": p["status"]})
+    for r in data["relations"]:
+        out.append({"ID": r["id"], "관계": f"{r['a']} ↔ {r['b']} ({r['relation']})", "규칙": r["rule"],
+                    "확인 상태": r["status"]})
+    return out
+
+
+def known_ids(data: dict | None = None) -> set[str]:
+    data = data or load_data()
+    return {p["id"] for p in data["policies"]} | {r["id"] for r in data["relations"]}
