@@ -265,6 +265,8 @@ def judge_kukchwi1(p, today, data) -> Verdict:
     own = p.get("own_income")
     if p.get("working") in ("short", "full") and own is None:
         v.missing.append("own_income")
+        v.add(f"일하는 중이면 본인 월소득을 알아야 판정할 수 있어요 (1인 가구 중위소득 60%인 "
+              f"{won(_own_income_limit(data))} 이상이면 제한).", "R13")
         if v.status == OK:  # 일하는 중이면 본인 소득을 알아야 판정 가능 (R13)
             v.status = ASK
     if own is not None and own >= _own_income_limit(data):
@@ -791,7 +793,8 @@ def compare_scenario(profile: dict, changes: dict, today: date, months_later: in
         rows.append({"pid": pid, "name": v.name, "before": v.status, "after": a.status,
                      "after_from": fmt(a.available_from) if a.available_from else None,
                      "changed": v.status != a.status or v.available_from != a.available_from,
-                     "after_reasons": [r.text for r in a.reasons], "rules": [r.rule for r in a.reasons]})
+                     "after_reasons": [r.text for r in a.reasons], "rules": [r.rule for r in a.reasons],
+                     "after_missing": [FIELD_LABELS.get(m, m) for m in dict.fromkeys(a.missing)]})
     plans = lambda res: [{"title": pl.title, "total": pl.total()} for pl in res["plans"]]
     return {
         "changes": [{"key": k, "label": FIELD_LABELS.get(k, k), "before": field_text(k, profile.get(k)),
