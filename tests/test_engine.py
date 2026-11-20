@@ -66,5 +66,27 @@ ok &= check("국취 Ⅰ유형 2027-07-01부터", r["verdicts"]["P2"].status == W
 ok &= check("국취 Ⅱ유형 2027-01-01부터", r["verdicts"]["P3"].status == WAIT and str(r["verdicts"]["P3"].available_from) == "2027-01-01")
 ok &= check("청년수당 기다림(R5)", r["verdicts"]["P4"].status == WAIT)
 
+# 추가: '만약에' 비교 (판정은 엔진이 다시 계산)
+import engine as _E
+from personas import PERSONAS as _P
+t1 = _P["T1"]["profile"]
+print("추가 · 만약에 비교")
+d = _E.compare_scenario(t1, {"working": "full", "own_income": 2500000}, TODAY)
+ch = {r["pid"]: r for r in d["rows"] if r["changed"]}
+ok &= check("취업(월 250만 원)하면 청년수당 불가", ch.get("P4", {}).get("after") == NO)
+ok &= check("취업(월 250만 원)하면 국취 Ⅰ 불가(R13)", ch.get("P2", {}).get("after") == NO)
+d = _E.compare_scenario(t1, {"youth_allowance_status": "receiving"}, TODAY)
+ok &= check("청년수당 받는 중이면 국취 Ⅰ 기다림(R4)", any(r["pid"] == "P2" and r["after"] == WAIT for r in d["rows"]))
+d = _E.compare_scenario(t1, {}, TODAY)
+ok &= check("바뀐 조건이 없으면 판정 변화 없음", not any(r["changed"] for r in d["rows"]))
+
+# 추가: AI 정리 평가 채점 (정답·놓침·틀림·추측)
+import evaluate as _V
+from eval_cases import CASES as _C
+print("추가 · AI 정리 평가 채점")
+sc = _V.score(_C[0], {"age": 25, "seoul": True, "school": "graduated", "working": "full", "low_income_class": True})
+ok &= check("채점: 정답 3·놓침 1·틀림 1·추측 1", len(sc["right"]) == 3 and sc["missed"] == ["training_interest"]
+            and len(sc["wrong"]) == 1 and len(sc["guessed"]) == 1)
+
 print("\n결과:", "모두 통과" if ok else "실패 있음")
 sys.exit(0 if ok else 1)
