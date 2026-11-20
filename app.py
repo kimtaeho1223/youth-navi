@@ -434,7 +434,8 @@ def show_scenario(result, p):
                 st.dataframe([{"제도": r["name"], "지금": f"{STATUS_ICON.get(r['before'], '')} {r['before']}",
                                "만약에": f"{STATUS_ICON.get(r['after'], '')} {r['after']}"
                                         + (f" ({r['after_from']}부터)" if r["after_from"] else ""),
-                               "근거": ", ".join(dict.fromkeys(r["rules"]))} for r in changed],
+                               "근거": ", ".join(dict.fromkeys(r["rules"])),
+                               "더 필요한 정보": ", ".join(r["after_missing"]) or "-"} for r in changed],
                              use_container_width=True, hide_index=True)
             else:
                 st.caption("판정이 달라지는 제도가 없어요.")
