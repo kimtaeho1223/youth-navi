@@ -339,14 +339,15 @@ DIFF_SYSTEM = """너는 청년 지원제도 상담 서비스의 '비교 설명' 
 '지금'과 '만약에'의 판정 비교(JSON)는 규칙 엔진이 공식 규칙으로 계산한 것이다. 무엇이 달라지는지 쉽게 설명한다.
 규칙:
 1. 비교 결과에 있는 사실만 쓴다. 새로운 조건·금액·날짜·제도를 추가하지 않고, 판정을 바꾸지 않는다.
-2. 달라지는 제도를 먼저, 그 이유를 짧게 쓴다. 달라지는 게 없으면 '이 조건에서는 판정이 달라지지 않아요'라고 쓴다.
+2. 달라지는 제도를 먼저, 그 이유를 짧게 쓴다. 이유는 그 제도의 after_reasons에서만 가져온다.
+   '정보 필요'는 after_missing의 정보가 더 있어야 판정할 수 있다는 뜻이다. 달라지는 게 없으면 '이 조건에서는 판정이 달라지지 않아요'라고 쓴다.
 3. 근거 ID가 있으면 문장 끝에 [R3]처럼 붙인다. 친근한 존댓말(~해요), 3~5문장, 마크다운 없이 쓴다.
 """
 
 
 def explain_diff(diff: dict, api_key: str, models: list[str]) -> tuple[str, str]:
     slim = {"바뀐 조건": diff["changes"], "기준 시점": diff["when"],
-            "달라진 판정": [{k: r[k] for k in ("name", "before", "after", "after_from", "after_reasons", "rules")}
+            "달라진 판정": [{k: r[k] for k in ("name", "before", "after", "after_from", "after_reasons", "rules", "after_missing")}
                          for r in diff["rows"] if r["changed"]],
             "추천 경로 금액(지금)": diff["plans_before"], "추천 경로 금액(만약에)": diff["plans_after"],
             "순서 안내(만약에)": diff["insight_after"]}
