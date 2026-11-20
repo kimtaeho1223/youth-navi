@@ -293,6 +293,86 @@ def timeline_html(tl) -> str:
     return f'<div style="padding:4px 2px">{head}{"".join(rows)}<div style="margin-top:8px">{legend}</div>{note}</div>'
 
 
+# 공식 신청·안내 페이지 (규칙표 '출처 목록'의 공식 주소만 사용)
+APPLY_LINKS = [
+    ("실업급여", "고용24 (실업급여 안내·신청)", "https://www.work24.go.kr"),
+    ("국민취업지원제도", "고용24 국민취업지원제도 신청 안내", "https://www.work24.go.kr/ua/z/z/1300/selectEmssRqutIntro.do"),
+    ("청년수당", "청년몽땅정보통 서울시 청년수당", "https://youth.seoul.go.kr/youthConts.do?key=2310100061&sc_bbsCtgrySn=2310200011&sc_pbancSeCd=012"),
+    ("KDT", "고용24 K-디지털 트레이닝 안내", "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systId=SI00000423&systClId=SC00000197"),
+    ("내일배움카드", "고용24 (내일배움카드 발급·훈련과정 검색)", "https://www.work24.go.kr"),
+    ("국비 훈련", "고용24 (내일배움카드 발급·훈련과정 검색)", "https://www.work24.go.kr"),
+    ("K-뉴딜", "고용노동부 청년뉴딜 안내", "https://moelyouth.work24.go.kr/"),
+]
+HELPLINE = "고용노동부 고객상담센터 1350"
+
+
+def links_for(text: str) -> list[tuple[str, str]]:
+    out, seen = [], set()
+    for kw, name, url in APPLY_LINKS:
+        if kw in text and (name, url) not in seen:
+            seen.add((name, url))
+            out.append((name, url))
+    return out
+
+
+def todo_items(pl, p) -> list[tuple[str, list[tuple[str, str]]]]:
+    """추천 경로 하나를 '할 일' 목록으로: (할 일 문장, [(링크 이름, 주소)])"""
+    items = []
+    interest = set(p.get("training_interest") or [])
+    if interest & {"kdt", "general"} and pl.key != "knewdeal":
+        extra = " (KDT도 카드가 있어야 해요)" if "kdt" in interest else ""
+        items.append((f"국민내일배움카드가 없으면 먼저 발급 신청하기{extra}", links_for("내일배움카드")))
+    for s in pl.steps:
+        items.append((f"{s.when}: {s.what}", links_for(s.what)))
+    for ck in pl.checks:
+        items.append((f"확인하기: {ck.text} ({HELPLINE})", []))
+    items.append(("신청 전에 공식 공고에서 자격·금액·모집 기간을 다시 확인하기", []))
+    return items
+
+
+def summary_text(result, chosen_key: str) -> str:
+    """내려받기용 결과 요약 (서버에 저장하지 않고 사용자 기기로만 내려감)"""
+    lines = ["청년 지원 내비 — 결과 요약", f"만든 날: {TODAY.isoformat()} · 규칙 기준일: {DATA['meta']['basis_date']}", ""]
+    lines.append("[제도별 판정]")
+    for v in result["verdicts"].values():
+        extra = f" ({E.fmt(v.available_from)}부터)" if v.available_from else ""
+        lines.append(f"- {v.name}: {v.status}{extra}")
+    if result["insight"]:
+        lines += ["", "[순서가 중요해요]", result["insight"].text]
+    for pl in result["plans"]:
+        mark = " ← 선택한 길" if pl.key == chosen_key else ""
+        lines += ["", f"[추천 경로] {pl.title}{mark}", pl.summary]
+        for text, links in todo_items(pl, st.session_state.profile):
+            lines.append(f"  □ {text}")
+            for name, url in links:
+                lines.append(f"      {name}: {url}")
+        for w in pl.warnings:
+            lines.append(f"  ! 주의: {w.text} ({w.rule})")
+        if pl.total():
+            lines.append(f"  알 수 있는 금액 합계: 최대 {E.won(pl.total())}")
+    lines += ["", "※ 공식 공고를 정리한 규칙으로 계산한 참고 정보예요. 최종 자격과 금액은 각 기관의 심사로 결정돼요.",
+              f"※ 문의: {HELPLINE}, 서울시 청년수당 콜센터 1566-3344"]
+    return "\n".join(lines)
+
+
+def show_next_actions(result, p):
+    plans = [pl for pl in result["plans"] if pl.steps]
+    if not plans:
+        return
+    st.markdown("### ✅ 다음에 할 일")
+    titles = [pl.title for pl in plans]
+    chosen = st.radio("어느 길로 갈지 골라 보세요", titles, horizontal=True, key="todo_plan")
+    pl = plans[titles.index(chosen)]
+    st.caption("체크 표시는 이 화면에서만 쓰여요 (저장하지 않아요). 링크는 모두 공식 기관 페이지예요.")
+    for i, (text, links) in enumerate(todo_items(pl, p)):
+        st.checkbox(text, key=f"todo_{pl.key}_{i}")
+        if links:
+            st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;→ " + " · ".join(f"[{n}]({u})" for n, u in links))
+    st.download_button("📄 결과 요약 내려받기 (.txt)", data=summary_text(result, pl.key),
+                       file_name=f"청년지원내비_결과_{TODAY.isoformat()}.txt", mime="text/plain",
+                       help="판정 결과와 할 일 목록을 내 기기에 텍스트 파일로 저장해요. 서버에는 저장하지 않아요.")
+
+
 def show_timelines(plans):
     plans = [pl for pl in plans if pl.timeline and pl.timeline.bars]
     if not plans:
@@ -385,6 +465,7 @@ def page_result():
                     show_evidence(rules)
 
     show_timelines(plans)
+    show_next_actions(result, p)
 
     # 제도별 판정
     st.markdown("### 🗂 제도별 판정")
