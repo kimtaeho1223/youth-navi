@@ -373,6 +373,51 @@ def show_next_actions(result, p):
                        help="판정 결과와 할 일 목록을 내 기기에 텍스트 파일로 저장해요. 서버에는 저장하지 않아요.")
 
 
+ASK_LIMIT = 5  # 결과 한 번에 질문 수 제한 (무료 사용량 보호)
+
+
+def show_ask(result, p):
+    """결과에 대해 AI에게 더 물어보기. 답은 판정 결과와 규칙표만 근거로 하고, 근거 번호를 검증해 보여준다."""
+    import json
+    st.markdown("### 💬 결과에 대해 더 물어보기")
+    if not API_KEY:
+        st.caption("AI 연결이 없어 이 기능은 지금 쓸 수 없어요. 궁금한 점은 고용노동부 고객상담센터(1350)에 문의하세요.")
+        return
+    st.caption(f"AI는 위 판정 결과와 규칙표(공식 자료 정리)로만 답해요. 규칙표에 없는 내용은 모른다고 하고 문의처를 알려줘요. "
+               f"개인정보는 적지 마세요. 결과 한 번에 {ASK_LIMIT}번까지 물어볼 수 있어요.")
+    sig = json.dumps(p, ensure_ascii=False, sort_keys=True, default=str)
+    if st.session_state.get("qa_sig") != sig:  # 입력이 바뀌면 질문 기록도 새로
+        st.session_state.qa_sig, st.session_state.qa = sig, []
+    hist = st.session_state.qa
+    with st.form("ask_form", clear_on_submit=True):
+        q = st.text_input("질문", placeholder="예) KDT를 중간에 그만두면 어떻게 돼요? / 청년수당 받으면서 국취도 돼요?", max_chars=300)
+        sent = st.form_submit_button("💬 물어보기", disabled=len(hist) >= ASK_LIMIT)
+    if sent and q and q.strip():
+        try:
+            with st.spinner("AI가 판정 결과와 규칙표에서 답을 찾고 있어요..."):
+                text, model, masked = llm.answer(q, E.summary_for_llm(result, p), E.rules_context(DATA), API_KEY, MODELS)
+            ids = llm.cited_ids(text)
+            known = E.known_ids(DATA)
+            hist.append({"q": llm.mask_pii(q)[0], "a": text, "model": model, "masked": masked,
+                         "ids": [i for i in ids if i in known], "bad": [i for i in ids if i not in known]})
+        except llm.LLMError as e:
+            st.warning(str(e))
+    if len(hist) >= ASK_LIMIT:
+        st.caption("질문 횟수를 다 썼어요. 더 궁금한 점은 고용노동부 고객상담센터(1350)에 문의하세요.")
+    for item in reversed(hist):
+        with st.container(border=True):
+            st.markdown(f"**🙋 {item['q']}**")
+            st.write(item["a"])
+            st.caption(f"※ AI가 생성한 답변이에요 (Google Gemini · {item['model']}). 판정은 위 규칙 결과가 기준이에요.")
+            if item["masked"]:
+                st.caption(f"개인정보로 보이는 내용 {item['masked']}개는 가리고 보냈어요.")
+            if item["bad"]:
+                st.warning(f"답변에 규칙표에 없는 근거 번호({', '.join(item['bad'])})가 있어요. 이 부분은 믿지 말고 1350에 확인하세요.")
+            if item["ids"]:
+                with st.expander("답변 근거 보기 (" + ", ".join(item["ids"]) + ")"):
+                    show_evidence(item["ids"])
+
+
 def show_timelines(plans):
     plans = [pl for pl in plans if pl.timeline and pl.timeline.bars]
     if not plans:
@@ -466,6 +511,7 @@ def page_result():
 
     show_timelines(plans)
     show_next_actions(result, p)
+    show_ask(result, p)
 
     # 제도별 판정
     st.markdown("### 🗂 제도별 판정")
