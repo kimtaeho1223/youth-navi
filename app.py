@@ -373,6 +373,85 @@ def show_next_actions(result, p):
                        help="판정 결과와 할 일 목록을 내 기기에 텍스트 파일로 저장해요. 서버에는 저장하지 않아요.")
 
 
+SCENARIO_LIMIT = 3
+SCENARIO_EXAMPLES = ["다음 달에 정규직으로 취업하면?", "청년수당을 지금 받고 있다면?", "실업급여를 받는 중이라면?"]
+
+
+def run_scenario(question, result, p):
+    """AI가 질문을 '바뀌는 조건'으로 바꾸고 → 규칙 엔진이 다시 판정 → AI가 차이를 설명."""
+    try:
+        with st.spinner("AI가 질문을 조건으로 바꾸고, 규칙 엔진이 다시 계산하고 있어요..."):
+            sc, masked, model = llm.understand_scenario(question, p, TODAY.isoformat(), API_KEY, MODELS)
+            if not sc["changes"] and not sc["months_later"]:
+                st.session_state.scn.append({"q": llm.mask_pii(question)[0], "fail": True, "model": model})
+                return
+            diff = E.compare_scenario(p, sc["changes"], TODAY, sc["months_later"], DATA)
+            text, model2 = llm.explain_diff(diff, API_KEY, MODELS)
+        st.session_state.scn.append({"q": llm.mask_pii(question)[0], "understood": sc["understood"], "diff": diff,
+                                     "text": text, "model": model2, "masked": masked})
+    except llm.LLMError as e:
+        st.warning(str(e))
+
+
+def show_scenario(result, p):
+    import json
+    st.markdown("### 🔀 만약에 비교해 보기")
+    if not API_KEY:
+        st.caption("AI 연결이 없어 이 기능은 지금 쓸 수 없어요.")
+        return
+    st.caption("상황이 바뀌면 어떻게 달라지는지 물어보세요. AI는 질문을 '바뀌는 조건'으로만 바꾸고, "
+               "판정은 규칙 엔진이 다시 계산해요. AI가 바꾼 조건이 맞는지 꼭 확인하세요. "
+               f"결과 한 번에 {SCENARIO_LIMIT}번까지 할 수 있어요.")
+    sig = json.dumps(p, ensure_ascii=False, sort_keys=True, default=str)
+    if st.session_state.get("scn_sig") != sig:
+        st.session_state.scn_sig, st.session_state.scn = sig, []
+    hist = st.session_state.scn
+    full = len(hist) >= SCENARIO_LIMIT
+    cols = st.columns(len(SCENARIO_EXAMPLES))
+    for col, ex in zip(cols, SCENARIO_EXAMPLES):
+        if col.button(ex, key=f"scn_ex_{ex}", disabled=full, use_container_width=True):
+            run_scenario(ex, result, p)
+    with st.form("scn_form", clear_on_submit=True):
+        q = st.text_input("만약에…", placeholder="예) 내년 3월에 졸업하면? / 서울로 이사하면? / 6개월 뒤에는?", max_chars=300)
+        sent = st.form_submit_button("🔀 비교하기", disabled=full)
+    if sent and q and q.strip():
+        run_scenario(q, result, p)
+    for item in reversed(hist):
+        with st.container(border=True):
+            st.markdown(f"**🔀 {item['q']}**")
+            if item.get("fail"):
+                st.info("이 질문은 판정 조건(취업, 졸업, 거주지, 받는 제도, 시점 등)으로 바꿀 수 없어요. "
+                        "위 '더 물어보기'를 이용하거나, 조건이 바뀌는 상황으로 물어봐 주세요.")
+                continue
+            d = item["diff"]
+            st.markdown("**AI가 이렇게 이해했어요** — " + (item["understood"] or ""))
+            cond = [f"{c['label']}: {c['before']} → **{c['after']}**" for c in d["changes"]]
+            if d["months_later"]:
+                cond.append(f"기준 시점: 오늘 → **{d['when']}** ({d['months_later']}개월 뒤)")
+            st.markdown("바뀐 조건: " + (" · ".join(cond) if cond else "없음"))
+            changed = [r for r in d["rows"] if r["changed"]]
+            if changed:
+                st.dataframe([{"제도": r["name"], "지금": f"{STATUS_ICON.get(r['before'], '')} {r['before']}",
+                               "만약에": f"{STATUS_ICON.get(r['after'], '')} {r['after']}"
+                                        + (f" ({r['after_from']}부터)" if r["after_from"] else ""),
+                               "근거": ", ".join(dict.fromkeys(r["rules"]))} for r in changed],
+                             use_container_width=True, hide_index=True)
+            else:
+                st.caption("판정이 달라지는 제도가 없어요.")
+            tb = {x["title"]: x["total"] for x in d["plans_before"]}
+            ta = {x["title"]: x["total"] for x in d["plans_after"]}
+            money = [f"{t}: {E.won(tb.get(t)) if tb.get(t) else '경로 없음'} → {E.won(ta.get(t)) if ta.get(t) else '경로 없음'}"
+                     for t in dict.fromkeys(list(tb) + list(ta)) if tb.get(t) != ta.get(t)]
+            if money:
+                st.caption("추천 경로 금액 변화: " + " · ".join(money))
+            st.write(item["text"])
+            st.caption(f"※ 판정 비교는 규칙 엔진이 계산했고, 설명은 AI가 생성했어요 (Google Gemini · {item['model']}).")
+            if item.get("masked"):
+                st.caption(f"개인정보로 보이는 내용 {item['masked']}개는 가리고 보냈어요.")
+    if full:
+        st.caption("비교 횟수를 다 썼어요. '✏️ 입력 고치기'로 조건을 직접 바꿔 다시 볼 수 있어요.")
+
+
 ASK_LIMIT = 5  # 결과 한 번에 질문 수 제한 (무료 사용량 보호)
 
 
@@ -511,6 +590,7 @@ def page_result():
 
     show_timelines(plans)
     show_next_actions(result, p)
+    show_scenario(result, p)
     show_ask(result, p)
 
     # 제도별 판정
@@ -542,9 +622,57 @@ def page_result():
         go("input")
 
 
+def page_eval():
+    """숨은 평가 화면 (?eval=1): AI 입력 정리 정확도를 가상 문장 10개로 잰다."""
+    import evaluate as V
+    from eval_cases import CASES
+    st.title("🧪 AI 입력 정리 정확도 평가")
+    st.caption(f"가상 문장 {len(CASES)}개(실제 개인정보 아님)를 Gemini로 정리하고, 사람이 미리 정한 정답과 비교해요. "
+               f"버튼을 누르면 Gemini를 {len(CASES)}번 호출해요.")
+    with st.expander("평가 문장과 정답 보기"):
+        for c in CASES:
+            st.markdown(f"**{c['id']}** {c['text']}")
+            st.caption("정답: " + ", ".join(f"{k}={v}" for k, v in c["expected"].items()))
+    if not API_KEY:
+        st.warning("AI 키가 없어 평가할 수 없어요.")
+        return
+    if st.button("▶ 평가 실행", type="primary"):
+        with st.spinner("가상 문장 10개를 정리하고 있어요..."):
+            st.session_state.eval_result = V.run(API_KEY, MODELS)
+    res = st.session_state.get("eval_result")
+    if not res:
+        return
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("정확도", f"{res['accuracy'] * 100:.0f}%", help="문장에 나온 항목을 맞게 채운 비율")
+    c2.metric("틀림 + 추측", f"{res['wrong'] + res['guessed']}개", help="위험한 실수: 다르게 채움 + 문장에 없는 걸 채움")
+    c3.metric("놓침", f"{res['missed']}개", help="안전한 실수: 비워 두면 앱이 다시 물어봐요")
+    c4.metric("문장 하나로 채운 항목", f"평균 {res['avg_filled']:.1f}개", help=f"직접 입력이면 {res['form_items']}개 항목을 사람이 채워요")
+    st.caption(f"정답 항목 {res['expected_total']}개 기준 · AI 정리 뒤 엔진이 더 물어본 질문 평균 {res['avg_remaining']:.1f}개 "
+               f"(아무 정보가 없을 때 첫 질문 {res['baseline']}개) · 오류 {res['errors']}건 · 평가일 {TODAY.isoformat()}")
+    rows = []
+    for r in res["rows"]:
+        if "error" in r:
+            rows.append({"ID": r["id"], "모델": "-", "정답": "-", "놓침": "-", "틀림": r["error"], "추측": "-"})
+            continue
+        rows.append({"ID": r["id"], "모델": r["model"], "정답": f"{len(r['right'])}/{r['expected_n']}",
+                     "놓침": ", ".join(r["missed"]) or "-", "틀림": "; ".join(r["wrong"]) or "-",
+                     "추측": "; ".join(r["guessed"]) or "-"})
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    import json
+    st.download_button("📄 평가 결과 내려받기 (.json)", data=json.dumps(res, ensure_ascii=False, indent=1, default=str),
+                       file_name=f"ai_extract_eval_{TODAY.isoformat()}.json", mime="application/json")
+
+
 def main():
     init_state()
     sidebar()
+    try:
+        is_eval = st.query_params.get("eval") == "1"
+    except Exception:
+        is_eval = False
+    if is_eval:  # 주소 끝에 ?eval=1 을 붙이면 평가 화면
+        page_eval()
+        return
     {"input": page_input, "confirm": page_confirm, "result": page_result}[st.session_state.stage]()
 
 
