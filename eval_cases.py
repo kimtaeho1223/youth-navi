@@ -15,6 +15,8 @@ CASES = [
         "id": "E1",
         "text": "올해 8월에 대학 졸업한 25살이에요 서울 살고요. 아직 일은 한 번도 안 해봤어요. KDT 하나 알아보는 중!",
         "expected": {"age": 25, "seoul": True, "school": "graduated", "working": "none", "training_interest": ["kdt"]},
+        # 11/20 1차 평가 후 추가: '일은 한 번도 안 해봤다' → 최근 2년 100일 이상 아님(False)은 문장에서 바로 따라 나옴
+        "ok_extra": {"work_exp_100days", "insured_days_18m"},
     },
     {
         "id": "E2",
