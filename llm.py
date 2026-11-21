@@ -79,6 +79,7 @@ EXTRACT_SYSTEM = """너는 청년 지원제도 상담 서비스의 '입력 정�
    18개월(540일)을 넘으면 540으로 쓴다. 4대보험 여부를 알 수 없는 알바는 null로 둔다.
 8. unemployment_status·kukchwi_status·youth_allowance_status는 '받는 중', '받았다/끝났다', '받은 적 없다'처럼 상태를 말했을 때만 쓴다.
    '해보려고요', '궁금해요'처럼 앞으로의 관심만 있으면 null로 둔다.
+   예: '국민취업지원제도도 같이 받고 싶은데 가능할까요?' → kukchwi_status null ('받고 싶다'는 지금 받는 중이 아님).
 10. 대학생이 '대학교 N학년'이라고 하면 years_left = 4 - N (전문대는 2 - N, 0보다 작으면 0)으로 쓴다 (예: 대학교 2학년 → 2).
 9. livelihood_benefit(생계급여)은 '생계급여'라는 말이 있을 때만 true로 쓴다. '기초생활수급', '차상위'라고만 하면 low_income_class만 true이고 livelihood_benefit은 null이다.
 """
@@ -258,6 +259,16 @@ def fill_missing_dates(profile: dict, text: str, today_iso: str) -> dict:
     except ValueError:
         return profile
     clauses = [c for c in re.split(r"[.!?\n,]|(?<=요) |(?<=다) ", text or "") if c.strip()]
+    # '받고 싶어요/할 수 있나요'처럼 바람·질문만 있는데 AI가 '받는 중'으로 적었으면 지운다
+    for field, words in (("kukchwi_status", ("국취", "국민취업")), ("youth_allowance_status", ("청년수당",)),
+                         ("unemployment_status", ("실업급여",))):
+        if profile.get(field) != "receiving":
+            continue
+        related = [c for c in clauses if any(w in c for w in words)]
+        now = any(re.search(r"받고\s*있|받는\s*중|참여\s*중|참여하고\s*있|하고\s*있", c) for c in related)
+        wish = any(re.search(r"싶|할\s*까|가능할|되나요|있나요|궁금|하려|해보려", c) for c in related)
+        if related and wish and not now:
+            profile.pop(field, None)
     # 'N학년'인데 졸업까지 남은 햇수가 비어 있으면 채운다 (4년제 기준, 전문대는 2년제)
     if profile.get("school") in ("enrolled", "leave") and profile.get("years_left") is None:
         m = re.search(r"([1-6])\s*학년", text or "")
