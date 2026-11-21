@@ -168,6 +168,10 @@ def judge_unemployment(p, today) -> Verdict:
         v.status = NO
         v.add("지금 취업 중이라 실업급여 대상이 아니에요.", "P1")
         return v
+    if p.get("working") == "short" and not p.get("quit_date"):
+        v.status = NO
+        v.add("지금 일하는 중이라 실업급여 대상이 아니에요 (일을 그만둔 뒤 다시 확인하세요).", "P1")
+        return v
     days = p.get("insured_days_18m")
     if days is None:
         v.status, v.missing = ASK, v.missing + ["insured_days_18m"]
@@ -544,17 +548,23 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
     # B. 국취 Ⅰ유형 중심
     if vk1.status in (OK, WAIT, ASK, CHECK):
         start = vk1.available_from or today
-        steps = [Step("지금" if start <= today else fmt(start) + "부터",
-                      "국민취업지원제도 Ⅰ유형 신청 (심사 약 1개월)", ["P2"] + ([r.rule for r in vk1.reasons if r.rule in ("R1", "R4")][:1]))]
+        steps = []
+        if vk1.status == CHECK:  # 예: 이전 참여 종료일을 몰라 재참여 가능 여부를 알 수 없음
+            steps.append(Step("가장 먼저", "고용센터(1350)에 참여할 수 있는지 확인해요: "
+                                       + " ".join(r.text for r in vk1.reasons if r.rule != "P2")[:120],
+                              [r.rule for r in vk1.reasons][:1] or ["P2"]))
+        steps.append(Step("지금" if start <= today else fmt(start) + "부터",
+                          ("참여할 수 있다면 " if vk1.status == CHECK else "") + "국민취업지원제도 Ⅰ유형 신청 (심사 약 1개월)",
+                          ["P2"] + ([r.rule for r in vk1.reasons if r.rule in ("R1", "R4")][:1])))
         money = [("구직촉진수당", 600000, 6)]
         if interest:
             steps.append(Step("참여하면서", "국비 훈련을 같이 들으면 구직촉진수당과 훈련장려금을 함께 받아요", ["R7"]))
             money += [(n, m, mo) for n, m, mo, _ in _training_items(p, verdicts)]
         warnings = [Reason("국민취업지원제도에 참여하는 동안은 서울시 청년수당을 신청할 수 없어요.", "R3"),
                     Reason("훈련장려금도 소득으로 신고해야 하고, 다른 소득과 합쳐 기준을 넘으면 수당이 줄 수 있어요.", "R9"),
-                    Reason("끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요.", "R15")]
+                    Reason("국민취업지원제도가 끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요.", "R15")]
         checks = [knewdeal_check] if "knewdeal" in interest else []
-        plans.append(Plan("kukchwi1", "국민취업지원제도 Ⅰ유형 + 교육",
+        plans.append(Plan("kukchwi1", "국민취업지원제도 Ⅰ유형 + 교육" + (" (자격 확인 필요)" if vk1.status == CHECK else ""),
                           "구직촉진수당(월 60만 원)을 받으면서 국비 교육을 같이 듣는 길이에요.",
                           steps, money, warnings, checks))
 
@@ -644,7 +654,7 @@ def plan_timeline(pl: Plan, p: dict, verdicts: dict[str, Verdict], today: date) 
                  Bar("구직촉진수당 월 60만 원 × 6개월", off + 1, 6, "money", "P2")]
         bars += _training_bars(p, verdicts, off + 1)
         bars.append(Bar("서울시 청년수당 신청 불가 (참여 중)", off, 7, "blocked", "R3"))
-        return Timeline("지금", bars, "끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요 (R15).")
+        return Timeline("지금", bars, "국민취업지원제도가 끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요 (R15).")
     if pl.key == "youth":
         bars = [Bar("서울시 청년수당 월 50만 원 × 6개월", 0, 6, "money", "P4")]
         if set(p.get("training_interest") or []) & {"kdt", "general"}:
