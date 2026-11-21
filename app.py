@@ -49,9 +49,18 @@ API_KEY = secret("GEMINI_API_KEY")
 MODELS = [m for m in [secret("GEMINI_MODEL")] if m] + llm.DEFAULT_MODELS
 
 
+EXTRACT_VERSION = "2026-11-21b"  # 정리 규칙을 바꾸면 이 값을 바꿔 예전 결과(캐시)를 쓰지 않게 한다
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def cached_extract(text: str, today_iso: str, models: tuple):
+def cached_extract(text: str, today_iso: str, models: tuple, version: str = EXTRACT_VERSION):
     return llm.extract_profile(text, today_iso, API_KEY, list(models))
+
+
+def clear_form():
+    """새로 정리할 때 확인 화면의 이전 입력값이 남지 않게 지운다."""
+    for k in [k for k in st.session_state.keys() if str(k).startswith("f_")]:
+        del st.session_state[k]
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -106,6 +115,7 @@ def page_input():
     if c1.button("🤖 AI로 정리하기", type="primary", use_container_width=True, disabled=not st.session_state.text.strip()):
         run_extract()
     if c2.button("✍️ 직접 입력하기", use_container_width=True):
+        clear_form()
         st.session_state.profile = {}
         st.session_state.notice = None
         go("confirm")
@@ -121,6 +131,7 @@ def run_extract():
     try:
         with st.spinner("AI가 상황을 정리하고 있어요..."):
             profile, masked, model = cached_extract(text, TODAY.isoformat(), tuple(MODELS))
+        profile = llm.fill_missing_dates(dict(profile), llm.mask_pii(text)[0], TODAY.isoformat())
         msg = f"AI({model})가 정리한 내용이에요. 틀린 곳은 고치고, 빈 곳은 채워주세요."
         if persona:
             # 예시 인물: AI가 비워 둔 칸만 미리 정해 둔 가상 인물 값으로 채운다 (AI가 정리한 값은 그대로 둠)
@@ -131,6 +142,7 @@ def run_extract():
                 msg += f" 예시 인물이라 AI가 비워 둔 {len(filled)}칸은 미리 정해 둔 값으로 채웠어요."
         if masked:
             msg += f" (개인정보로 보이는 내용 {masked}개는 AI에 보내기 전에 가렸어요.)"
+        clear_form()
         st.session_state.profile = profile
         st.session_state.notice = ("success", msg)
     except llm.LLMError as e:
