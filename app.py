@@ -275,7 +275,7 @@ def timeline_html(tl) -> str:
     total = max(b.start + b.length for b in tl.bars)
     total = max(total, 6)
     ticks = "".join(
-        f'<span style="position:absolute;left:{m / total * 100:.2f}%;transform:translateX(-50%);font-size:11px;color:#777">{m}</span>'
+        f'<span style="position:absolute;left:{m / total * 100:.2f}%;transform:translateX(-50%);font-size:11px;color:inherit;opacity:.7">{m}</span>'
         for m in range(0, total + 1, 2 if total <= 14 else 3))
     rows = []
     for b in tl.bars:
@@ -285,7 +285,7 @@ def timeline_html(tl) -> str:
         inner = b.text or ("이때부터 →" if b.kind == "open" else f"{b.length}개월")
         rows.append(
             '<div style="display:flex;align-items:center;margin:5px 0">'
-            f'<div style="flex:0 0 38%;font-size:13px;padding-right:8px;color:#333">{_h.escape(b.label)}'
+            f'<div style="flex:0 0 38%;font-size:13px;padding-right:8px;color:inherit">{_h.escape(b.label)}'
             f' <code style="font-size:10px">{_h.escape(b.rule)}</code></div>'
             '<div style="flex:1;position:relative;height:22px;background:repeating-linear-gradient(90deg,#f7f7f7 0,#f7f7f7 1px,transparent 1px,transparent '
             f'{100 / total:.3f}%);border-radius:4px">'
@@ -298,10 +298,10 @@ def timeline_html(tl) -> str:
         for bg, bd, _, name in TL_STYLE.values())
     legend += ('<span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;border:1.5px dashed #888;'
                'border-radius:2px;vertical-align:-2px"></span> 기간이 사람·과정마다 달라 그림 길이는 가정</span>')
-    head = (f'<div style="font-size:12px;color:#555;margin-bottom:4px">0개월 = <b>{_h.escape(tl.anchor)}</b> · 가로축은 개월</div>'
+    head = (f'<div style="font-size:12px;color:inherit;opacity:.8;margin-bottom:4px">0개월 = <b>{_h.escape(tl.anchor)}</b> · 가로축은 개월</div>'
             '<div style="display:flex"><div style="flex:0 0 38%"></div>'
             f'<div style="flex:1;position:relative;height:16px">{ticks}</div></div>')
-    note = f'<div style="font-size:12px;color:#555;margin-top:6px">{_h.escape(tl.note)}</div>' if tl.note else ""
+    note = f'<div style="font-size:12px;color:inherit;opacity:.8;margin-top:6px">{_h.escape(tl.note)}</div>' if tl.note else ""
     return f'<div style="padding:4px 2px">{head}{"".join(rows)}<div style="margin-top:8px">{legend}</div>{note}</div>'
 
 
