@@ -69,7 +69,8 @@ EXTRACT_SYSTEM = """너는 청년 지원제도 상담 서비스의 '입력 정�
 규칙:
 1. 문장에 근거가 있는 값만 채우고, 근거가 없으면 반드시 null로 둔다. 추측하지 않는다.
 2. 자격을 판정하거나 조언하지 않는다. 오직 JSON 하나만 출력한다.
-3. '올해', '작년' 같은 표현은 오늘 날짜를 기준으로 연도를 계산한다.
+3. '올해', '작년', '내년' 같은 표현은 오늘 날짜를 기준으로 연도를 계산한다.
+   제도가 끝난 시점이 나오면 *_end에도 꼭 쓴다 (예: 오늘이 2026-11-21이고 '작년 3월에 국취 끝났어요' → kukchwi_status "ended", kukchwi_end "2025-03-01").
 4. 알바·아르바이트를 지금 하고 있으면 working은 "short", 이미 그만뒀으면 "none"이다.
 5. 'KDT', 'K-디지털 트레이닝', 'AI 국비 교육(6개월)'은 "kdt", 'K-뉴딜'은 "knewdeal", 그 밖의 국비·내일배움카드 훈련은 "general"이다.
 6. 날짜에 '일'이 없고 '월'까지만 있으면 그 달 1일로 쓴다 (예: 2026년 9월 → 2026-09-01). 사용자가 확인 화면에서 고칠 수 있다.
@@ -245,8 +246,12 @@ def clean_profile(d: dict) -> dict:
                 pass
         elif k in BOOLS and isinstance(v, bool):
             out[k] = v
-        elif k in DATES and isinstance(v, str) and re.match(r"^\d{4}-\d{2}(-\d{2})?$", v):
-            out[k] = v
+        elif k in DATES and isinstance(v, str):
+            m = re.match(r"^\s*(\d{4})\s*[-./년]\s*(\d{1,2})\s*(?:[-./월]\s*(\d{1,2}))?", v)
+            if m:  # 2025-03, 2025.3, 2025년 3월 → 2025-03-01 (일이 없으면 1일)
+                y, mo, dd = int(m.group(1)), int(m.group(2)), int(m.group(3) or 1)
+                if 1 <= mo <= 12 and 1 <= dd <= 31:
+                    out[k] = f"{y:04d}-{mo:02d}-{dd:02d}"
         elif k == "training_interest" and isinstance(v, list):
             out[k] = [x for x in v if x in {"kdt", "knewdeal", "general"}]
     return out
