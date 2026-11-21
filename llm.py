@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import datetime as _dt
 
 # 정식 모델 이름을 먼저 시도하고, 모두 안 되면 내 키로 쓸 수 있는 flash 모델을 자동으로 찾는다.
 DEFAULT_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.7-flash"]  # 11/19: 2.x 모델은 404(종료)
@@ -213,7 +214,59 @@ def extract_profile(text: str, today_iso: str, api_key: str, models: list[str]) 
         if not m:
             raise LLMError("AI 응답을 읽지 못했어요. 직접 입력해 주세요.")
         data = json.loads(m.group(0))
-    return clean_profile(data), n, model
+    profile = fill_missing_dates(clean_profile(data), masked, today_iso)
+    return profile, n, model
+
+
+# AI가 날짜를 빠뜨렸을 때를 위한 보조 규칙 (문장에 날짜가 분명히 있을 때만 채움)
+_DATE_RE = re.compile(r"(재작년|작년|지난해|올해|금년|(\d{4})\s*년|(\d{2})\s*년)?\s*(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?")
+_DATE_TARGETS = [  # (날짜 칸, 문장 속 단어, 이 칸을 채울 조건)
+    ("kukchwi_end", ("국취", "국민취업"), lambda p: p.get("kukchwi_status") == "ended"),
+    ("youth_allowance_end", ("청년수당",), lambda p: p.get("youth_allowance_status") == "ended"),
+    ("unemployment_end", ("실업급여",), lambda p: p.get("unemployment_status") == "ended"),
+    ("quit_date", ("퇴사", "그만", "관뒀", "관둠", "나왔"), lambda p: True),
+]
+
+
+def _find_date(clause: str, today: _dt.date):
+    m = _DATE_RE.search(clause)
+    if not m:
+        return None
+    word, y4, y2, mo, dd = m.group(1), m.group(2), m.group(3), int(m.group(4)), int(m.group(5) or 1)
+    if not (1 <= mo <= 12 and 1 <= dd <= 31):
+        return None
+    if y4:
+        y = int(y4)
+    elif y2:
+        y = 2000 + int(y2)
+    elif word in ("작년", "지난해"):
+        y = today.year - 1
+    elif word == "재작년":
+        y = today.year - 2
+    elif word in ("올해", "금년"):
+        y = today.year
+    else:  # 연도 없이 '3월'만: 지난 일이므로 올해 그 달이 아직 안 왔으면 작년
+        y = today.year if mo <= today.month else today.year - 1
+    return f"{y:04d}-{mo:02d}-{dd:02d}"
+
+
+def fill_missing_dates(profile: dict, text: str, today_iso: str) -> dict:
+    """AI가 비워 둔 종료일·퇴사일을 같은 문장 조각에 있는 날짜로 채운다."""
+    try:
+        today = _dt.date.fromisoformat(today_iso)
+    except ValueError:
+        return profile
+    clauses = [c for c in re.split(r"[.!?\n,]|(?<=요) |(?<=다) ", text or "") if c.strip()]
+    for field, words, cond in _DATE_TARGETS:
+        if profile.get(field) or not cond(profile):
+            continue
+        for c in clauses:
+            if any(w in c for w in words):
+                d = _find_date(c, today)
+                if d:
+                    profile[field] = d
+                    break
+    return profile
 
 
 ALLOWED = {
