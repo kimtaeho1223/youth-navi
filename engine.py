@@ -173,6 +173,12 @@ def judge_unemployment(p, today) -> Verdict:
         v.add("지금 일하는 중이라 실업급여 대상이 아니에요 (일을 그만둔 뒤 다시 확인하세요).", "P1")
         return v
     days = p.get("insured_days_18m")
+    if (p.get("school") in ("enrolled", "leave", "last_semester") and p.get("working") in (None, "none")
+            and days is None and not p.get("quit_date") and not p.get("quit_reason")):
+        # 학생이고 일하다 그만둔 이야기가 전혀 없으면 퇴사 질문을 늘어놓지 않는다
+        v.status = NO
+        v.add("일하다 그만둔 기록이 없어 대상이 아니에요. 4대보험 되는 곳에서 일하다 그만뒀다면 퇴사일과 가입 일수를 입력하면 다시 판정해요.", "P1")
+        return v
     if days is None:
         v.status, v.missing = ASK, v.missing + ["insured_days_18m"]
     elif days < 180:
@@ -213,7 +219,7 @@ def _kukchwi_common(v: Verdict, p, today, data, type1: bool) -> None:
         v.status, v.missing = ASK, v.missing + ["school"]
     elif school in ("enrolled", "leave"):
         v.status = NO
-        v.add("학교에 다니는 중이면 참여할 수 없어요. 단, 최종학년 마지막 학기 재학·휴학생은 참여 가능해요.", "P2")
+        v.add("재학 중이거나 휴학 중이면 참여할 수 없어요 (예외: 최종학년 마지막 학기인 경우만 재학·휴학생도 참여 가능).", "P2")
     elif school == "last_semester":
         v.add("최종학년 마지막 학기라 참여할 수 있어요 (재학·성적증명서 제출).", "P2")
     if p.get("livelihood_benefit") and type1:
