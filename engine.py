@@ -517,15 +517,20 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
     if v1.status in (OK, NOW, CHECK) or (v1.status == ASK and (p.get("insured_days_18m") or 0) >= 180):
         quit_date = to_date(p.get("quit_date"))
         deadline = add_months(quit_date, 12) if quit_date else None
-        steps = [Step("지금" if v1.status != NOW else "지금 (받는 중)",
-                      "실업급여를 먼저 받아요" + (f". {fmt(deadline)} 전에 다 받아야 해요" if deadline else ""), ["R14"])]
+        steps = []
+        if v1.status == CHECK:  # 스스로 그만둔 경우 등: 받을 수 있는지부터 확인
+            steps.append(Step("가장 먼저", "고용센터에 실업급여를 받을 수 있는지 확인해요 (스스로 그만둔 경우 정당한 사유가 있어야 해요). "
+                                       "받을 수 없으면 아래 다른 길을 보세요", ["P1"]))
+        steps.append(Step("지금" if v1.status != NOW else "지금 (받는 중)",
+                          ("받을 수 있다면 " if v1.status == CHECK else "") + "실업급여를 먼저 받아요"
+                          + (f". {fmt(deadline)} 전에 다 받아야 해요" if deadline else ""), ["R14"]))
         if interest:
             steps.append(Step("실업급여 받는 동안", "국비 훈련은 들을 수 있지만 훈련장려금은 나오지 않아요", ["R6"]))
         steps.append(Step("실업급여 끝난 다음 날", "국민취업지원제도 Ⅱ유형에 바로 참여할 수 있어요", ["R2"]))
         steps.append(Step("실업급여 끝나고 6개월 뒤", "국민취업지원제도 Ⅰ유형(구직촉진수당)에 참여할 수 있어요 (소득 조건 충족 시)", ["R1"]))
         warnings = [Reason("실업급여를 받는 동안에는 서울시 청년수당을 신청할 수 없어요.", "R5")]
         checks = [knewdeal_check] if "knewdeal" in interest else []
-        plans.append(Plan("unemployment", "실업급여 먼저",
+        plans.append(Plan("unemployment", "실업급여 먼저" + (" (자격 확인 필요)" if v1.status == CHECK else ""),
                           "고용보험 이력이 있으면 기한(12개월)이 있는 실업급여를 먼저 받는 게 보통 유리해요.",
                           steps, [("실업급여 (고용센터가 산정)", None, None)], warnings, checks))
 
@@ -659,6 +664,10 @@ def plan_timeline(pl: Plan, p: dict, verdicts: dict[str, Verdict], today: date) 
 
 def order_insight(plans: list[Plan]) -> Reason | None:
     keys = {pl.key for pl in plans}
+    unemp = next((pl for pl in plans if pl.key == "unemployment"), None)
+    if unemp and "확인" in unemp.title:
+        return Reason("실업급여를 받을 수 있는지(스스로 그만둔 경우 정당한 사유)부터 고용센터에 확인하세요. 받을 수 있다면 12개월 기한이 있어 "
+                      "먼저 받는 게 보통 유리하고, 받을 수 없다면 국민취업지원제도·청년수당 길을 비교해 보세요.", "P1·R14")
     if "unemployment" in keys:
         return Reason("실업급여는 12개월 기한이 있어서 보통 먼저 받는 게 유리해요. 받는 동안에는 국민취업지원제도와 청년수당을 신청할 수 없고, "
                       "끝난 뒤 Ⅱ유형은 바로, Ⅰ유형은 6개월 뒤에 참여할 수 있어요.", "R14·R1·R2·R5")
