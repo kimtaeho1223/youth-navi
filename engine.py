@@ -468,7 +468,11 @@ def judge_knewdeal(p, today, data) -> Verdict:
         v.status = NO
         v.add("미취업 청년이 대상이에요.", "P7")
         return v
-    if p.get("school") in ("enrolled", "leave", "last_semester"):
+    if p.get("school") is None:  # 재학생 등 일부 제외라서 학교 상태를 알아야 함
+        if v.status == OK:
+            v.status = ASK
+        v.missing.append("school")
+    elif p.get("school") in ("enrolled", "leave", "last_semester"):
         v.status = CHECK
         v.add("재학생 등 일부는 제외돼요. 지원하려는 아카데미 모집 공고를 확인하세요.", "P7")
     cap = p.get("training_capital")
@@ -731,6 +735,7 @@ def summary_for_llm(result: dict, profile: dict | None = None) -> dict:
     return {
         "관심 교육": labels or ["특정 교육을 고르지 않음"],
         "판정": [{"정책": v.name, "결과": v.status, "이유": [r.text for r in v.reasons if keep(r)],
+                  "더 필요한 정보": [FIELD_LABELS.get(m, m) for m in dict.fromkeys(v.missing)],
                   "가능 시작일": fmt(v.available_from) if v.available_from else None}
                  for pid, v in result["verdicts"].items() if pid not in skip_pids],
         "추천 경로": [{"이름": pl.title, "설명": pl.summary, "순서": [f"{s.when}: {s.what}" for s in pl.steps],
