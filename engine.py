@@ -567,8 +567,17 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
                           "고용보험 이력이 있으면 기한(12개월)이 있는 실업급여를 먼저 받는 게 보통 유리해요.",
                           steps, [("실업급여 (고용센터가 산정)", None, None)], warnings, checks))
 
+    # 나이·거주지·학교처럼 기본 정보가 비어 있는 '정보 필요' 제도로는 경로를 만들지 않는다 (금액이 확정된 것처럼 보이지 않게)
+    BASIC = {"age", "seoul", "school"}
+
+    def plannable(v: Verdict, ok=(OK, WAIT, CHECK)) -> bool:
+        return v.status in ok or (v.status == ASK and not (set(v.missing) & BASIC))
+
+    def ask_tag(v: Verdict) -> str:
+        return " (정보 더 필요)" if v.status == ASK else ""
+
     # B. 국취 Ⅰ유형 중심
-    if vk1.status in (OK, WAIT, ASK, CHECK):
+    if plannable(vk1):
         start = vk1.available_from or today
         steps = []
         if vk1.status == CHECK:  # 예: 이전 참여 종료일을 몰라 재참여 가능 여부를 알 수 없음
@@ -586,12 +595,12 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
                     Reason("훈련장려금도 소득으로 신고해야 하고, 다른 소득과 합쳐 기준을 넘으면 수당이 줄 수 있어요.", "R9"),
                     Reason("국민취업지원제도가 끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요.", "R15")]
         checks = [knewdeal_check] if "knewdeal" in interest else []
-        plans.append(Plan("kukchwi1", "국민취업지원제도 Ⅰ유형 + 교육" + (" (자격 확인 필요)" if vk1.status == CHECK else ""),
+        plans.append(Plan("kukchwi1", "국민취업지원제도 Ⅰ유형 + 교육" + (" (자격 확인 필요)" if vk1.status == CHECK else ask_tag(vk1)),
                           "구직촉진수당(월 60만 원)을 받으면서 국비 교육을 같이 듣는 길이에요.",
                           steps, money, warnings, checks))
 
     # C. 청년수당 중심 (국취 참여 중이면 위 '0' 경로에서 안내)
-    if vy.status in (OK, WAIT, ASK) and not kst_now:
+    if plannable(vy, (OK, WAIT)) and not kst_now:
         steps = [Step("다음 모집 때", "서울시 청년수당 신청 (1년에 1~2번 모집, 공고 확인)", ["P4"])]
         money = [("서울시 청년수당", 500000, 6)]
         if interest and ("kdt" in interest or "general" in interest):
@@ -607,7 +616,7 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
         warnings = [Reason("청년수당은 생애 1번만 받을 수 있어요.", "P4"),
                     Reason("청년수당이 끝난 뒤 6개월 동안은 국민취업지원제도 Ⅰ유형에 참여할 수 없어요.", "R4")]
         checks = [knewdeal_check] if "knewdeal" in interest else []
-        plans.append(Plan("youth", "서울시 청년수당 + 교육",
+        plans.append(Plan("youth", "서울시 청년수당 + 교육" + ask_tag(vy),
                           "청년수당(월 50만 원)을 받으면서 국비 교육을 같이 듣는 길이에요. 모집 시기를 기다려야 해요.",
                           steps, money, warnings, checks))
 
