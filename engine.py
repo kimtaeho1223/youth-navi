@@ -575,7 +575,13 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
         if interest and ("kdt" in interest or "general" in interest):
             steps.append(Step("받으면서", "KDT·내일배움카드 훈련을 같이 들을 수 있어요", ["R12"]))
             money += [(n, m, mo) for n, m, mo, _ in _training_items(p, verdicts)]
-        steps.append(Step("청년수당 끝나고 6개월 뒤", "그때부터 국민취업지원제도 Ⅰ유형에 참여할 수 있어요 (최종 판단은 고용센터)", ["R4"]))
+        kst, kend = _program_state(p, "kukchwi")
+        r15 = add_months(kend, 36) if (kst == "ended" and kend and add_months(kend, 36) > today) else None
+        if r15:  # 이전 국취 참여 3년 제한이 남아 있으면 두 조건을 모두 지나야 함
+            steps.append(Step("청년수당 끝나고 6개월 뒤, 그리고 " + fmt(r15) + " 이후",
+                              "두 조건을 모두 지나면 국민취업지원제도 Ⅰ유형에 다시 참여할 수 있어요 (최종 판단은 고용센터)", ["R4", "R15"]))
+        else:
+            steps.append(Step("청년수당 끝나고 6개월 뒤", "그때부터 국민취업지원제도 Ⅰ유형에 참여할 수 있어요 (최종 판단은 고용센터)", ["R4"]))
         warnings = [Reason("청년수당은 생애 1번만 받을 수 있어요.", "P4"),
                     Reason("청년수당이 끝난 뒤 6개월 동안은 국민취업지원제도 Ⅰ유형에 참여할 수 없어요.", "R4")]
         checks = [knewdeal_check] if "knewdeal" in interest else []
