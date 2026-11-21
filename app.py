@@ -49,7 +49,7 @@ API_KEY = secret("GEMINI_API_KEY")
 MODELS = [m for m in [secret("GEMINI_MODEL")] if m] + llm.DEFAULT_MODELS
 
 
-EXTRACT_VERSION = "2026-11-21c"  # 정리 규칙을 바꾸면 이 값을 바꿔 예전 결과(캐시)를 쓰지 않게 한다
+EXTRACT_VERSION = "2026-11-21d"  # 정리 규칙을 바꾸면 이 값을 바꿔 예전 결과(캐시)를 쓰지 않게 한다
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -585,7 +585,8 @@ def page_result():
                 st.caption(pl.summary)
                 for n, s in enumerate(pl.steps, 1):
                     st.markdown(f"**{n}. {s.when}** — {s.what}  `{' '.join(s.rules)}`")
-                st.markdown("**예상 지원금**")
+                if pl.money:
+                    st.markdown("**예상 지원금**")
                 for name, monthly, months in pl.money:
                     if monthly is None:
                         st.write(f"- {name}: 금액 확인 필요")
