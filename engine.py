@@ -173,9 +173,10 @@ def judge_unemployment(p, today) -> Verdict:
         v.add("지금 일하는 중이라 실업급여 대상이 아니에요 (일을 그만둔 뒤 다시 확인하세요).", "P1")
         return v
     days = p.get("insured_days_18m")
-    if (p.get("school") in ("enrolled", "leave", "last_semester") and p.get("working") in (None, "none")
+    in_program = _program_state(p, "kukchwi")[0] == "receiving" or _program_state(p, "youth_allowance")[0] == "receiving"
+    if ((p.get("school") in ("enrolled", "leave", "last_semester") or in_program) and p.get("working") in (None, "none")
             and days is None and not p.get("quit_date") and not p.get("quit_reason")):
-        # 학생이고 일하다 그만둔 이야기가 전혀 없으면 퇴사 질문을 늘어놓지 않는다
+        # 학생이거나 다른 제도에 참여 중이고, 일하다 그만둔 이야기가 전혀 없으면 퇴사 질문을 늘어놓지 않는다
         v.status = NO
         v.add("일하다 그만둔 기록이 없어 대상이 아니에요. 4대보험 되는 곳에서 일하다 그만뒀다면 퇴사일과 가입 일수를 입력하면 다시 판정해요.", "P1")
         return v
@@ -530,8 +531,23 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
     v1, vk1, vk2, vy, vkn = (verdicts[k] for k in ("P1", "P2", "P3", "P4", "P7"))
     knewdeal_check = Reason("K-뉴딜 아카데미와 같이 받을 수 있는지는 과정마다 달라요. 모집 공고·운영기관에 확인하세요.", "R11")
 
+    kst_now = _program_state(p, "kukchwi")[0] == "receiving"
+
+    # 0. 지금 국취 참여 중: 참여를 이어가며 교육을 더하는 길
+    if kst_now:
+        steps = [Step("지금 (참여 중)", "국민취업지원제도 참여를 이어가요. 담당 상담사와 취업활동계획을 함께 세워요", ["P2"])]
+        if interest:
+            steps.append(Step("참여하면서", "KDT 등 국비 훈련을 같이 들을 수 있어요. 들으려는 과정을 담당 상담사와 먼저 상의하세요", ["R7"]))
+        steps.append(Step("참여가 끝난 뒤", "서울시 청년수당은 참여가 끝난 뒤에 신청할 수 있는지 확인해요 (참여 중엔 신청 불가)", ["R3"]))
+        warnings = [Reason("국민취업지원제도에 참여하는 동안은 서울시 청년수당을 신청할 수 없어요.", "R3"),
+                    Reason("국민취업지원제도가 끝난 뒤 다시 참여하려면 원칙적으로 3년을 기다려야 해요.", "R15")]
+        checks = [knewdeal_check] if "knewdeal" in interest else []
+        plans.append(Plan("kukchwi_now", "국민취업지원제도 계속 + 교육",
+                          "이미 참여 중인 국민취업지원제도를 이어가면서 국비 교육을 더하는 길이에요.",
+                          steps, [], warnings, checks))
+
     # A. 실업급여 먼저
-    if v1.status in (OK, NOW, CHECK) or (v1.status == ASK and (p.get("insured_days_18m") or 0) >= 180):
+    if not kst_now and v1.status in (OK, NOW, CHECK) or (v1.status == ASK and (p.get("insured_days_18m") or 0) >= 180):
         quit_date = to_date(p.get("quit_date"))
         deadline = add_months(quit_date, 12) if quit_date else None
         steps = []
@@ -574,8 +590,8 @@ def build_plans(p: dict, verdicts: dict[str, Verdict], today: date, data: dict) 
                           "구직촉진수당(월 60만 원)을 받으면서 국비 교육을 같이 듣는 길이에요.",
                           steps, money, warnings, checks))
 
-    # C. 청년수당 중심
-    if vy.status in (OK, WAIT, ASK):
+    # C. 청년수당 중심 (국취 참여 중이면 위 '0' 경로에서 안내)
+    if vy.status in (OK, WAIT, ASK) and not kst_now:
         steps = [Step("다음 모집 때", "서울시 청년수당 신청 (1년에 1~2번 모집, 공고 확인)", ["P4"])]
         money = [("서울시 청년수당", 500000, 6)]
         if interest and ("kdt" in interest or "general" in interest):
