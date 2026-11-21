@@ -409,7 +409,10 @@ def judge_card(p, today, data) -> Verdict:
         v.add("생계급여 수급자는 발급 대상에서 빠져요 (조건부 수급자 등 예외 있음).", "P5")
         return v
     school = p.get("school")
-    if school in ("enrolled", "leave"):
+    if school is None:  # 졸업까지 2년 이상 남은 대학생은 제외라서 학교 상태를 알아야 함
+        v.status = ASK
+        v.missing.append("school")
+    elif school in ("enrolled", "leave"):
         left = p.get("years_left")
         if left is None:
             v.status = ASK
