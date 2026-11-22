@@ -519,7 +519,10 @@ def _training_items(p, verdicts, during_unemployment=False):
     items = []
     interest = p.get("training_interest") or []
     if "kdt" in interest and verdicts["P6"].status in (OK, ASK):
-        items.append(("KDT 훈련장려금 (월 최대, 평균 6개월 가정)", None if during_unemployment else 200000, 6, "P6"))
+        # 훈련장려금은 실업 상태 또는 주 15시간 미만 근로일 때만 (P6): 취업 중이면 금액을 셈에 넣지 않음
+        working_full = p.get("working") == "full"
+        items.append(("KDT 훈련장려금 (월 최대, 평균 6개월 가정)" + (" — 취업 중이면 대상 아닐 수 있음" if working_full else ""),
+                      None if (during_unemployment or working_full) else 200000, 6, "P6"))
     if "general" in interest and verdicts["P5"].status in (OK, ASK):
         items.append(("일반 훈련 훈련장려금 (월 최대, 기간은 과정별)", None if during_unemployment else 116000, None, "P5"))
     return items
