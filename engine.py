@@ -869,3 +869,31 @@ def compare_scenario(profile: dict, changes: dict, today: date, months_later: in
         "insight_before": before["insight"].text if before["insight"] else None,
         "insight_after": after["insight"].text if after["insight"] else None,
     }
+
+
+# ---------------- 금액 근거 수준 (11/22) ----------------
+# 화면의 '예상 지원금' 줄마다 어떤 자료 기준인지 보여 준다. 2차·옛 자료 금액은 '참고용'으로 표시.
+AMOUNT_BASIS = [
+    ("구직촉진수당", "공식", "고용24 국민취업지원제도 안내 기준"),
+    ("서울시 청년수당", "공식", "청년몽땅정보통 청년수당 소개 기준"),
+    ("KDT 훈련장려금", "공식", "고용24 K-디지털 트레이닝 제도안내 기준 (기간은 평균 가정)"),
+    ("일반 훈련 훈련장려금", "참고용", "고용센터 안내문 게시본·2022년 고용노동부 상담 답변 기준"),
+    ("K-뉴딜", "공식", "고용노동부 보도자료(2026.6) 기준"),
+    ("실업급여", "공식", "금액은 고용센터가 산정"),
+]
+
+
+def amount_basis(item_name: str) -> tuple[str, str]:
+    """예상 지원금 항목 이름 → (근거 수준, 설명). 모르면 ('참고용', '')."""
+    for key, level, note in AMOUNT_BASIS:
+        if item_name.startswith(key):
+            return level, note
+    return "참고용", ""
+
+
+def rule_status(rule_id: str, data: dict) -> str:
+    """규칙·정책 ID의 출처 확인 상태 ('공식 확인' / '공식 + 2차 섞임' / '2차 자료')."""
+    for x in data.get("policies", []) + data.get("relations", []):
+        if x.get("id") == rule_id:
+            return x.get("status", "")
+    return ""
