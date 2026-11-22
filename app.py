@@ -360,6 +360,10 @@ def summary_text(result, chosen_key: str) -> str:
                 lines.append(f"      {name}: {url}")
         for w in pl.warnings:
             lines.append(f"  ! 주의: {w.text} ({w.rule})")
+        for name, monthly, months in pl.money:
+            level, basis = E.amount_basis(name)
+            amt = "금액 확인 필요" if monthly is None else f"월 {monthly:,}원" + (f" × {months}개월" if months else "")
+            lines.append(f"  · {name}: {amt}" + (f" [{'공식' if level == '공식' else '참고용'}: {basis}]" if basis else ""))
         if pl.total():
             lines.append(f"  알 수 있는 금액 합계: 최대 {E.won(pl.total())}")
     lines += ["", "※ 공식 공고를 정리한 규칙으로 계산한 참고 정보예요. 최종 자격과 금액은 각 기관의 심사로 결정돼요.",
@@ -588,14 +592,21 @@ def page_result():
                 if pl.money:
                     st.markdown("**예상 지원금**")
                 for name, monthly, months in pl.money:
+                    level, basis = E.amount_basis(name)
+                    tag = f"  \n  <small>{'🟢' if level == '공식' else '🟠 참고용'} {basis}</small>" if basis else ""
                     if monthly is None:
-                        st.write(f"- {name}: 금액 확인 필요")
+                        st.markdown(f"- {name}: 금액 확인 필요{tag}", unsafe_allow_html=True)
                     else:
-                        st.write(f"- {name}: 월 {monthly:,}원" + (f" × {months}개월" if months else ""))
+                        st.markdown(f"- {name}: 월 {monthly:,}원" + (f" × {months}개월" if months else "") + tag,
+                                    unsafe_allow_html=True)
                 if pl.total():
                     st.markdown(f"**알 수 있는 금액 합계: 최대 {pl.total():,}원**")
+                if any("R7" in s.rules for s in pl.steps) and len(pl.money) > 1:
+                    st.caption("🟠 국민취업지원제도 수당과 훈련장려금을 함께 받는다는 근거는 2022년 고용노동부 상담 답변(참고용)이에요. "
+                               "당시 금액은 지금과 달라요. 최종 금액은 고용센터가 정해요.")
                 for w in pl.warnings:
-                    st.warning(f"{w.text} `{w.rule}`")
+                    ref = " · 🟠 참고용(2차 자료)" if E.rule_status(w.rule, DATA) == "2차 자료" else ""
+                    st.warning(f"{w.text} `{w.rule}`{ref}")
                 for ck in pl.checks:
                     st.info(f"확인 필요: {ck.text} `{ck.rule}`")
                 with st.expander("근거 보기"):
