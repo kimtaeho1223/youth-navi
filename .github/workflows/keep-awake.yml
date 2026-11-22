@@ -5,7 +5,7 @@ name: keep-streamlit-awake
 
 on:
   schedule:
-    - cron: "17 */4 * * *"   # 4시간마다 (UTC 기준, 매시 17분)
+    - cron: "17 */2 * * *"   # 4시간마다 (UTC 기준, 매시 17분)
   workflow_dispatch:          # Actions 탭에서 직접 실행도 가능
 
 jobs:
